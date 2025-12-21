@@ -1,0 +1,53 @@
+# Configuration for NinaPro Database 1
+# 10-channel surface EMG, 52 movements across 3 exercises, 27 subjects
+# Reference: https://ninapro.hevs.ch/
+
+dataset:
+  name: ninapro_db1
+  n_channels: 10
+  sampling_rate: 100.0  # NinaPro DB1 is sampled at 100Hz
+  data_dir: datasets/ninapro_db1/data
+  file_pattern: "**/*.mat"
+  loader_type: mat
+  label_column: restimulus  # Use refined timing labels
+  # emg_columns: [0, 8]  # Uncomment to use forearm channels only (1-8)
+  # emg_columns: [0, 10]  # All 10 channels (default)
+
+# Output directories (relative to dataset root)
+output:
+  features_dir: features
+  training_dir: training
+  tuning_dir: tuning
+  models_dir: models
+  analysis_dir: analysis
+
+window:
+  size: 20       # 200ms at 100Hz
+  increment: 5   # 50ms stride (75% overlap)
+
+features:
+  extractor_type: combined
+  # Spectral features (Khushaba)
+  spectral_moments: true
+  spectral_flux: true
+  spectral_sparsity: true
+  irregularity_factor: true
+  spectrum_correlation: true
+  # Time-domain features
+  time_mav: true
+  time_wl: true
+  time_zc: true
+  time_ssc: true
+  time_threshold: 0.01
+
+normalizer:
+  type: standard
+
+evaluation:
+  cv_type: loso
+  n_folds: 5
+  calibration_samples: 0
+  feature_selection: none
+
+models:
+  - name: lda

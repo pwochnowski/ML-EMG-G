@@ -1,0 +1,58 @@
+# Configuration for the Rami EMG Dataset
+# 7-channel surface EMG recordings of 8 hand gestures across 5 positions
+
+dataset:
+  name: rami_dataset
+  n_channels: 7
+  sampling_rate: 1000.0
+  data_dir: datasets/rami/data
+  file_pattern: "Pos*_*.txt"
+  loader_type: text
+  label_mapping:
+
+# Output directories (relative to dataset root)
+output:
+  features_dir: features
+  training_dir: training
+  tuning_dir: tuning
+  models_dir: models
+  analysis_dir: analysis
+    WristFlex: 1
+    WristExte: 2
+    WristPron: 3
+    WristSupi: 4
+    ObjectGri: 5
+    PichGrip_: 6
+    HandOpen_: 7
+    HandRest_: 8
+
+window:
+  size: 400      # 400ms at 1000Hz
+  increment: 100 # 75% overlap
+
+features:
+  extractor_type: combined
+  # Spectral features (Khushaba)
+  spectral_moments: true
+  spectral_flux: true
+  spectral_sparsity: true
+  irregularity_factor: true
+  spectrum_correlation: true
+  # Time-domain features
+  time_mav: true
+  time_wl: true
+  time_zc: true
+  time_ssc: true
+  time_threshold: 0.01
+
+normalizer:
+  type: standard
+
+evaluation:
+  cv_type: loso
+  n_folds: 5
+  calibration_samples: 0
+  feature_selection: none
+
+models:
+  - name: lda

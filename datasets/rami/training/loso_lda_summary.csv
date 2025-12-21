@@ -1,0 +1,2 @@
+model,mean_acc,std_acc,n_folds
+lda,0.6197943175895692,0.1360204453312461,11

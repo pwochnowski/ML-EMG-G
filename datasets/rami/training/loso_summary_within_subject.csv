@@ -1,0 +1,2 @@
+subject,model,mean_acc,std_acc,n_folds
+S1_Male,svm,0.974789029535865,0.000504665966751322,5
