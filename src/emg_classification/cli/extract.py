@@ -10,7 +10,7 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 
 from ..config import load_config, PipelineConfig, WindowConfig, FeatureConfig, DatasetConfig
-from ..data.loaders import TextFileLoader, MatFileLoader
+from ..data.loaders import get_loader, DB1Loader, RamiLoader
 from ..data.windowing import sliding_window
 from ..features import extract_spectral_features, extract_time_features, extract_combined_features
 
@@ -65,15 +65,23 @@ def process_subject(
     Returns:
         Tuple of (X, y, files, positions) arrays.
     """
-    # Create loader
-    loader = TextFileLoader(
-        data_dir=subject_dir,
-        n_channels=dataset_config.n_channels,
-        sampling_rate=dataset_config.sampling_rate,
-        file_pattern=dataset_config.file_pattern,
-        label_mapping=dataset_config.label_mapping or None,
-        subject_mapping=subject_mapping,
-    )
+    # Create loader using factory function
+    LoaderClass = get_loader(dataset_config.loader_type or "rami")
+    
+    # Build loader kwargs based on loader type
+    loader_kwargs = {
+        "data_dir": subject_dir,
+        "n_channels": dataset_config.n_channels,
+        "sampling_rate": dataset_config.sampling_rate,
+        "file_pattern": dataset_config.file_pattern,
+    }
+    
+    # Add loader-specific parameters
+    if dataset_config.loader_type in ("rami", "text"):
+        loader_kwargs["label_mapping"] = dataset_config.label_mapping or None
+        loader_kwargs["subject_mapping"] = subject_mapping
+    
+    loader = LoaderClass(**loader_kwargs)
     
     # Get feature extractor
     extractor = get_extractor(feature_config, dataset_config.sampling_rate)
@@ -157,19 +165,24 @@ def process_continuous_data(
     Returns:
         Tuple of (X, y, groups, positions) arrays.
     """
-    # Create MAT loader
-    emg_columns = None
-    if dataset_config.emg_columns:
-        emg_columns = tuple(dataset_config.emg_columns)
+    # Create loader using factory function
+    LoaderClass = get_loader(dataset_config.loader_type or "db1")
     
-    loader = MatFileLoader(
-        data_dir=data_dir,
-        n_channels=dataset_config.n_channels,
-        sampling_rate=dataset_config.sampling_rate,
-        file_pattern=dataset_config.file_pattern,
-        label_column=dataset_config.label_column or "restimulus",
-        emg_columns=emg_columns,
-    )
+    # Build loader kwargs based on loader type
+    loader_kwargs = {
+        "data_dir": data_dir,
+        "n_channels": dataset_config.n_channels,
+        "sampling_rate": dataset_config.sampling_rate,
+        "file_pattern": dataset_config.file_pattern,
+    }
+    
+    # Add loader-specific parameters
+    if dataset_config.loader_type in ("db1", "mat"):
+        if dataset_config.emg_columns:
+            loader_kwargs["emg_columns"] = tuple(dataset_config.emg_columns)
+        loader_kwargs["label_column"] = dataset_config.label_column or "restimulus"
+    
+    loader = LoaderClass(**loader_kwargs)
     
     # Get feature extractor
     extractor = get_extractor(feature_config, dataset_config.sampling_rate)

@@ -8,7 +8,7 @@ dataset:
   sampling_rate: 2000.0  # NinaPro DB1 is sampled at 2kHz
   data_dir: datasets/db1/data
   file_pattern: "**/*.mat"
-  loader_type: mat
+  loader_type: db1  # Use dataset-specific loader
   label_column: restimulus  # Use refined timing labels
   # emg_columns: [0, 8]  # Use forearm channels only (1-8)
   emg_columns: [0, 10]  # All 10 channels (default)

@@ -7,7 +7,7 @@ dataset:
   sampling_rate: 4000.0  # Paper: "sampled at 4000 Hz" (Khushaba et al.)
   data_dir: datasets/rami/data
   file_pattern: "Pos*_*.txt"
-  loader_type: text
+  loader_type: rami  # Use dataset-specific loader
   label_mapping:
     WristFlex: 1
     WristExte: 2
