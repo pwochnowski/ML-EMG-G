@@ -49,7 +49,51 @@ datasets/*/models/*.h5
 
 # Feature files (large, regenerable)
 datasets/*/features/*.npz
+datasets/*/features/**/*.npz
 !datasets/*/features/.gitkeep
+
+# Large files (general)
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.tar.bz2
+*.rar
+*.7z
+
+# Large binary/data files
+*.bin
+*.dat
+*.npy
+*.npz
+*.parquet
+*.feather
+*.arrow
+*.hdf5
+*.h5
+*.mat
+*.csv
+*.tsv
+
+# Large model files
+*.pt
+*.pth
+*.onnx
+*.pb
+*.tflite
+*.safetensors
+*.ckpt
+*.model
+*.weights
+
+# Large media files
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.wav
+*.mp3
+*.flac
 
 # OS
 .DS_Store

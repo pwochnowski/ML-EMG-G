@@ -42,6 +42,10 @@ def load_dataset_config(dataset_name: str) -> dict:
     # Resolve output directories relative to dataset root
     dataset_root = Path(f"datasets/{dataset_name}")
     output = config.get("output", {})
+    
+    # Get feature_subdir from config (default: combined/all)
+    feature_subdir = config.get("feature_subdir", "combined/all")
+    
     config["_resolved"] = {
         "features_dir": dataset_root / output.get("features_dir", "features"),
         "training_dir": dataset_root / output.get("training_dir", "training"),
@@ -49,7 +53,25 @@ def load_dataset_config(dataset_name: str) -> dict:
         "models_dir": dataset_root / output.get("models_dir", "models"),
         "analysis_dir": dataset_root / output.get("analysis_dir", "analysis"),
         "data_dir": dataset_root / "data",
+        "feature_subdir": feature_subdir,
     }
+    
+    # Get subject list from config
+    dataset_cfg = config.get("dataset", {})
+    subjects = dataset_cfg.get("subjects", None)
+    if subjects:
+        if isinstance(subjects, dict):
+            # Mapping format (rami): {folder: id} -> list of ids
+            config["_resolved"]["subjects"] = list(subjects.values())
+            config["_resolved"]["subject_mapping"] = subjects
+        else:
+            # List format (db1): [id1, id2, ...]
+            config["_resolved"]["subjects"] = subjects
+            config["_resolved"]["subject_mapping"] = None
+    else:
+        config["_resolved"]["subjects"] = None
+        config["_resolved"]["subject_mapping"] = None
+    
     return config
 
 
@@ -68,8 +90,8 @@ def get_normalizer(name: str):
     return normalizers[name]
 
 
-def subsample_data(X, y, groups, positions, subsample_frac: float = None, 
-                   subsample_n: int = None, random_state: int = 42):
+def subsample_data(X, y, groups, positions, subsample_frac: Optional[float] = None, 
+                   subsample_n: Optional[int] = None, random_state: int = 42):
     """
     Subsample the dataset while maintaining stratification by class and subject.
     
@@ -146,14 +168,46 @@ def subsample_data(X, y, groups, positions, subsample_frac: float = None,
     return X_out, y_out, groups_out, positions_out
 
 
-def collect_subject_files(results_dir: Path, pattern: str):
+def collect_subject_files(results_dir: Path, pattern: str, subject_list: Optional[list] = None):
+    """Collect subject feature files from results directory.
+    
+    Args:
+        results_dir: Directory containing feature files
+        pattern: Glob pattern for feature files (e.g., '*.npz')
+        subject_list: Optional list of subject IDs to look for. If provided,
+                      files are matched by name (e.g., 's01.npz'). If None,
+                      all matching files are collected.
+    
+    Returns:
+        List of (subject_id, file_path) tuples
+    """
+    if subject_list:
+        # Look for specific subjects from config
+        subjects = []
+        for subj in subject_list:
+            # Try exact match first (new format: s01.npz)
+            path = results_dir / f"{subj}.npz"
+            if path.exists():
+                subjects.append((subj, path))
+            else:
+                # Fall back to legacy format: s01_features_combined.npz
+                legacy_path = results_dir / f"{subj}_features_combined.npz"
+                if legacy_path.exists():
+                    subjects.append((subj, legacy_path))
+        return subjects
+    
+    # No subject list provided - discover from files
     files = sorted(results_dir.glob(pattern))
     subjects = []
     for f in files:
         name = f.name
-        # expect filenames like <subject>_features_combined.npz
+        # Handle both new format (s01.npz) and legacy format (s01_features_combined.npz)
         if '_features_combined.npz' in name:
             subj = name.split('_features_combined.npz')[0]
+        elif '_features.npz' in name:
+            subj = name.split('_features.npz')[0]
+        elif name.endswith('.npz'):
+            subj = name.replace('.npz', '')
         else:
             subj = name.split('.')[0]
         subjects.append((subj, f))
@@ -466,14 +520,15 @@ def parse_args():
     p = argparse.ArgumentParser(description='LOSO evaluation across subjects')
     p.add_argument('--dataset', help='Dataset name (e.g. "rami"). Auto-resolves paths from config.yaml')
     p.add_argument('--results-dir', help='Directory containing per-subject combined .npz files (overrides --dataset)')
-    p.add_argument('--pattern', default='*_features_combined.npz', help='Glob pattern for combined feature files')
+    p.add_argument('--feature-subdir', help='Feature subdirectory (e.g., "combined/all", "spectral/e1"). Overrides config default.')
+    p.add_argument('--pattern', default='*.npz', help='Glob pattern for feature files (default: *.npz)')
     p.add_argument('--models', default='lda,svm', help='Comma-separated models to evaluate')
     p.add_argument('--save-models-dir', help='Directory to save per-fold models (optional)')
     p.add_argument('--out-csv', help='Output CSV file for LOSO summary (default: auto from --dataset)')
     p.add_argument('--log-level', default='INFO', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], help='Logging level')
     p.add_argument('--per-position', action='store_true', help='Run LOSO separately for each position found in pooled data')
     p.add_argument('--positions', help='Comma-separated list of positions to evaluate (default: all)')
-    p.add_argument('--subjects', help='Comma-separated list of subjects to include (default: all). E.g. --subjects S1_Male,S2_Male')
+    p.add_argument('--subjects', help='Comma-separated list of subjects to include (default: all). E.g. --subjects s01,s02')
     p.add_argument('--feat-select', default='none', choices=['none', 'kbest', 'pca'], help='Feature selection method to apply (per-fold)')
     p.add_argument('--k', type=int, default=50, help='Number of features for SelectKBest (used when --feat-select=kbest)')
     p.add_argument('--pca-n', type=int, default=50, help='Number of PCA components (used when --feat-select=pca)')
@@ -487,6 +542,7 @@ def parse_args():
                    help='Normalization strategy for domain adaptation (default: standard)')
     p.add_argument('--calibration', type=int, default=0, 
                    help='Number of samples per class from test subject to use for calibration (default: 0 = no calibration)')
+    p.add_argument('--labels', help='Filter to specific labels. Can be comma-separated (1,2,3) or range (13-20) or mix (1-12,30-52)')
     return p.parse_args()
 
 
@@ -494,17 +550,25 @@ if __name__ == '__main__':
     args = parse_args()
     
     # Resolve paths from dataset config or explicit arguments
+    subject_list = None
     if args.dataset:
         config = load_dataset_config(args.dataset)
-        results_dir = config["_resolved"]["features_dir"]
+        
+        # Determine feature_subdir (CLI arg overrides config)
+        feature_subdir = args.feature_subdir or config["_resolved"]["feature_subdir"]
+        
+        # Build results directory: features_dir / feature_subdir
+        results_dir = config["_resolved"]["features_dir"] / feature_subdir
+        
         default_out_csv = config["_resolved"]["training_dir"] / "loso_summary.csv"
         default_models_dir = config["_resolved"]["models_dir"]
+        subject_list = config["_resolved"]["subjects"]
     else:
         results_dir = Path(args.results_dir) if args.results_dir else Path("results")
         default_out_csv = results_dir / "loso_summary.csv"
         default_models_dir = results_dir / "models"
     
-    files = collect_subject_files(results_dir, args.pattern)
+    files = collect_subject_files(results_dir, args.pattern, subject_list)
     if not files:
         raise SystemExit(f'No files found matching pattern {args.pattern} in {results_dir}')
 
@@ -518,6 +582,24 @@ if __name__ == '__main__':
     print(f'Found {len(files)} subject files. Subjects: {[s for s,_ in files]}')
     X, y, groups, positions = load_and_pool(files)
     print(f'Pooled dataset: X.shape={X.shape}, y.shape={y.shape}, subjects={len(np.unique(groups))}')
+
+    # Filter by labels if specified
+    if args.labels:
+        label_set = set()
+        for part in args.labels.split(','):
+            part = part.strip()
+            if '-' in part:
+                start, end = map(int, part.split('-'))
+                label_set.update(range(start, end + 1))
+            else:
+                label_set.add(int(part))
+        mask = np.isin(y, list(label_set))
+        X, y, groups, positions = X[mask], y[mask], groups[mask], positions[mask]
+        # Re-encode labels to be contiguous starting from 0
+        unique_labels = np.unique(y)
+        label_map = {old: new for new, old in enumerate(unique_labels)}
+        y = np.array([label_map[yi] for yi in y])
+        print(f'After label filter ({args.labels}): X.shape={X.shape}, classes={len(unique_labels)}')
 
     # Apply subsampling if requested
     if args.subsample or args.subsample_n:

@@ -3,15 +3,45 @@
 # Reference: https://ninapro.hevs.ch/
 
 dataset:
-  name: ninapro_db1
+  name: db1
   n_channels: 10
-  sampling_rate: 100.0  # NinaPro DB1 is sampled at 100Hz
-  data_dir: datasets/ninapro_db1/data
+  sampling_rate: 2000.0  # NinaPro DB1 is sampled at 2kHz
+  data_dir: datasets/db1/data
   file_pattern: "**/*.mat"
   loader_type: mat
   label_column: restimulus  # Use refined timing labels
-  # emg_columns: [0, 8]  # Uncomment to use forearm channels only (1-8)
-  # emg_columns: [0, 10]  # All 10 channels (default)
+  # emg_columns: [0, 8]  # Use forearm channels only (1-8)
+  emg_columns: [0, 10]  # All 10 channels (default)
+  
+  # Subject list (folders in data_dir)
+  subjects:
+    - s01
+    - s02
+    - s03
+    - s04
+    - s05
+    - s06
+    - s07
+    - s08
+    - s09
+    - s10
+    - s11
+    - s12
+    - s13
+    - s14
+    - s15
+    - s16
+    - s17
+    - s18
+    - s19
+    - s20
+    - s21
+    - s22
+    - s23
+    - s24
+    - s25
+    - s26
+    - s27
 
 # Output directories (relative to dataset root)
 output:
@@ -20,10 +50,14 @@ output:
   tuning_dir: tuning
   models_dir: models
   analysis_dir: analysis
+  
+# Default feature subdirectory (relative to features_dir)
+# Format: {extractor_type}/{subset_name}
+feature_subdir: combined/e2
 
 window:
-  size: 20       # 200ms at 100Hz
-  increment: 5   # 50ms stride (75% overlap)
+  size: 400      # 200ms at 2kHz
+  increment: 100 # 50ms stride (75% overlap)
 
 features:
   extractor_type: combined
@@ -48,6 +82,3 @@ evaluation:
   n_folds: 5
   calibration_samples: 0
   feature_selection: none
-
-models:
-  - name: lda

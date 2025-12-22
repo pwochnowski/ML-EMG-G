@@ -14,7 +14,7 @@ NinaPro DB1 contains surface EMG recordings from **27 intact subjects** performi
 
 Each subject has 3 `.mat` files, one per exercise:
 ```
-datasets/ninapro_db1/data/
+datasets/db1/data/
 ├── s01/
 │   ├── S1_A1_E1.mat  # Exercise 1
 │   ├── S1_A1_E2.mat  # Exercise 2
@@ -132,13 +132,13 @@ The `MatFileLoader` applies this offset automatically when `global_labels=True` 
 
 ```bash
 # Extract features for all subjects
-uv run emg-extract --config datasets/ninapro_db1/config.yaml --out-dir results/ninapro/
+uv run emg-extract --config datasets/db1/config.yaml --out-dir results/ninapro/
 
 # Extract for specific subjects
-uv run emg-extract --config datasets/ninapro_db1/config.yaml --subjects s01 s02 --out-dir results/ninapro/
+uv run emg-extract --config datasets/db1/config.yaml --subjects s01 s02 --out-dir results/ninapro/
 
 # Filter by exercise
-uv run emg-extract --config datasets/ninapro_db1/config.yaml --exercises 1 --out-dir results/ninapro/
+uv run emg-extract --config datasets/db1/config.yaml --exercises 1 --out-dir results/ninapro/
 ```
 
 ## References

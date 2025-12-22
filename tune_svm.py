@@ -22,10 +22,11 @@ def main():
     
     config = load_dataset_config(args.dataset)
     features_dir = config["_resolved"]["features_dir"]
+    feature_subdir = config.get("feature_subdir")  # e.g. "combined/e2"
     tuning_dir = config["_resolved"]["tuning_dir"]
     tuning_dir.mkdir(parents=True, exist_ok=True)
     
-    X, y, groups = load_features_for_tuning(features_dir, subsample_frac=args.subsample)
+    X, y, groups = load_features_for_tuning(features_dir, subsample_frac=args.subsample, feature_subdir=feature_subdir)
     
     # Verify coverage
     print(f'Tuning on {len(X)} samples, {X.shape[1]} features, {len(np.unique(y))} classes, {len(np.unique(groups))} subjects')

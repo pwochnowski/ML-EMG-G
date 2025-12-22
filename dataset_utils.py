@@ -28,7 +28,8 @@ def load_dataset_config(dataset_name: str) -> dict:
 
 
 def load_features_for_tuning(features_dir: Path, subsample_frac: float = 0.05, 
-                             random_state: int = 42, encode_labels: bool = False):
+                             random_state: int = 42, encode_labels: bool = False,
+                             feature_subdir: str = None):
     """Load and subsample feature data for hyperparameter tuning.
     
     Args:
@@ -36,18 +37,31 @@ def load_features_for_tuning(features_dir: Path, subsample_frac: float = 0.05,
         subsample_frac: Fraction of data to keep (stratified by subject and label)
         random_state: Random seed for reproducibility
         encode_labels: Whether to re-encode labels to 0-indexed integers
+        feature_subdir: Optional subdirectory within features_dir (e.g. 'combined/e2')
         
     Returns:
         X, y, groups: Feature matrix, labels, and subject group labels
     """
-    data_files = sorted(features_dir.glob('*_features_combined.npz'))
-    if not data_files:
-        raise FileNotFoundError(f"No *_features_combined.npz files found in {features_dir}")
+    # Use specific subdir if provided
+    if feature_subdir:
+        search_dir = features_dir / feature_subdir
+        data_files = sorted(search_dir.glob('*.npz'))
+        if not data_files:
+            raise FileNotFoundError(f"No feature files found in {search_dir}")
+    else:
+        # Try multiple patterns: direct files, combined/all subdirectory
+        data_files = sorted(features_dir.glob('*_features_combined.npz'))
+        if not data_files:
+            # Try combined/all/*.npz pattern (db1 format)
+            data_files = sorted(features_dir.glob('combined/all/*.npz'))
+        if not data_files:
+            raise FileNotFoundError(f"No feature files found in {features_dir}")
     
     X_all, y_all, groups_all = [], [], []
     for f in data_files:
         data = np.load(f)
-        subj = f.name.replace('_features_combined.npz', '')
+        # Extract subject name - handle both formats
+        subj = f.stem.replace('_features_combined', '')  # works for both s01.npz and S1_Male_features_combined.npz
         X_all.append(data['X'])
         y_all.append(data['y'])
         groups_all.append(np.array([subj] * len(data['X'])))

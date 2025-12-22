@@ -58,6 +58,7 @@ def process_subject(
     output_path: Optional[Path] = None,
     positions: Optional[List[str]] = None,
     limit: int = 0,
+    subject_mapping: Optional[dict] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Process EMG files for a single subject.
     
@@ -71,6 +72,7 @@ def process_subject(
         sampling_rate=dataset_config.sampling_rate,
         file_pattern=dataset_config.file_pattern,
         label_mapping=dataset_config.label_mapping or None,
+        subject_mapping=subject_mapping,
     )
     
     # Get feature extractor
@@ -247,7 +249,7 @@ def process_continuous_data(
         # Optionally save per-subject file
         if output_dir:
             output_dir.mkdir(parents=True, exist_ok=True)
-            out_path = output_dir / f"{subject}_features.npz"
+            out_path = output_dir / f"{subject}.npz"
             np.savez_compressed(
                 out_path,
                 X=X,
@@ -347,6 +349,11 @@ def main(args: Optional[List[str]] = None):
         action="store_true",
         help="Include rest class (label 0) for continuous data"
     )
+    parser.add_argument(
+        "--subset-name",
+        default="all",
+        help="Subset name for output directory (e.g., 'all', 'e1', 'pos1'). Output: features/{extractor_type}/{subset_name}/{subject}.npz"
+    )
     
     parsed = parser.parse_args(args)
     
@@ -380,13 +387,16 @@ def main(args: Optional[List[str]] = None):
         subjects = parsed.subjects.split(",") if parsed.subjects else None
         exercises = [int(e) for e in parsed.exercises.split(",")] if parsed.exercises else None
         
+        # Build nested output directory: features/{extractor_type}/{subset_name}/
+        subset_output_dir = output_dir / feature_config.extractor_type / parsed.subset_name
+        
         # Process continuous data (NinaPro-style)
         X, y, groups, positions = process_continuous_data(
             data_dir=dataset_config.data_dir,
             dataset_config=dataset_config,
             window_config=window_config,
             feature_config=feature_config,
-            output_dir=output_dir,
+            output_dir=subset_output_dir,
             subjects=subjects,
             exercises=exercises,
             include_rest=parsed.include_rest,
@@ -397,15 +407,29 @@ def main(args: Optional[List[str]] = None):
         # Original text file processing
         subject_dir = Path(parsed.subject) if parsed.subject else dataset_config.data_dir
         output_path = parsed.out
+        
+        # Get subject mapping and standardized subject ID from config
+        subjects_config = getattr(dataset_config, 'subjects', None)
+        subject_mapping = None
+        folder_name = subject_dir.name
+        
+        if subjects_config and isinstance(subjects_config, dict):
+            # Use mapping: folder_name -> subject_id
+            subject_mapping = subjects_config
+            subject_id = subjects_config.get(folder_name, folder_name)
+        else:
+            subject_id = folder_name
+        
         if output_dir:
-            output_dir = Path(output_dir)
-            output_dir.mkdir(parents=True, exist_ok=True)
+            # Build nested output directory: features/{extractor_type}/{subset_name}/
+            subset_output_dir = output_dir / feature_config.extractor_type / parsed.subset_name
+            subset_output_dir.mkdir(parents=True, exist_ok=True)
             if output_path:
-                output_path = output_dir / output_path.name
+                output_path = subset_output_dir / output_path.name
             else:
-                output_path = output_dir / f"{subject_dir.name}_features.npz"
+                output_path = subset_output_dir / f"{subject_id}.npz"
         elif output_path is None:
-            output_path = Path(f"{subject_dir.name}_features.npz")
+            output_path = Path(f"{subject_id}.npz")
         
         # Parse positions
         positions = parsed.positions.split(",") if parsed.positions else None
@@ -419,6 +443,7 @@ def main(args: Optional[List[str]] = None):
             output_path=output_path,
             positions=positions,
             limit=parsed.limit,
+            subject_mapping=subject_mapping,
         )
 
 

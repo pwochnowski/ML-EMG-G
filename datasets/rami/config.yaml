@@ -4,19 +4,11 @@
 dataset:
   name: rami_dataset
   n_channels: 7
-  sampling_rate: 1000.0
+  sampling_rate: 4000.0  # Paper: "sampled at 4000 Hz" (Khushaba et al.)
   data_dir: datasets/rami/data
   file_pattern: "Pos*_*.txt"
   loader_type: text
   label_mapping:
-
-# Output directories (relative to dataset root)
-output:
-  features_dir: features
-  training_dir: training
-  tuning_dir: tuning
-  models_dir: models
-  analysis_dir: analysis
     WristFlex: 1
     WristExte: 2
     WristPron: 3
@@ -25,6 +17,33 @@ output:
     PichGrip_: 6
     HandOpen_: 7
     HandRest_: 8
+  
+  # Subject mapping: folder name -> standardized ID
+  # Maps original folder names to consistent IDs (s01-s11)
+  subjects:
+    S1_Male: s01
+    S2_Male: s02
+    S3_Male: s03
+    S4_Male: s04
+    S5-Male: s05
+    S6_Male: s06
+    S7_Male: s07
+    S8_Male: s08
+    S9_Female: s09
+    S10_Male: s10
+    S11_Male: s11
+
+# Output directories (relative to dataset root)
+output:
+  features_dir: features
+  training_dir: training
+  tuning_dir: tuning
+  models_dir: models
+  analysis_dir: analysis
+
+# Default feature subdirectory (relative to features_dir)
+# Format: {extractor_type}/{subset_name}
+feature_subdir: combined/all
 
 window:
   size: 400      # 400ms at 1000Hz
@@ -53,6 +72,3 @@ evaluation:
   n_folds: 5
   calibration_samples: 0
   feature_selection: none
-
-models:
-  - name: lda

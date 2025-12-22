@@ -47,6 +47,7 @@ class TextFileLoader(DataLoader):
         file_pattern: str = "Pos*_*.txt",
         label_mapping: Optional[Dict[str, int]] = None,
         position_pattern: str = r"(Pos\d+)_",
+        subject_mapping: Optional[Dict[str, str]] = None,
     ):
         """Initialize the text file loader.
         
@@ -58,6 +59,8 @@ class TextFileLoader(DataLoader):
             label_mapping: Mapping from filename prefix (first 9 chars after position)
                           to class label. Defaults to Rami dataset mapping.
             position_pattern: Regex pattern to extract position from filename.
+            subject_mapping: Optional mapping from folder names to standardized
+                            subject IDs (e.g., {'S1_Male': 's01'}).
         """
         if label_mapping is None:
             label_mapping = DEFAULT_RAMI_LABEL_MAPPING
@@ -70,6 +73,7 @@ class TextFileLoader(DataLoader):
             label_mapping=label_mapping,
         )
         self.position_pattern = position_pattern
+        self.subject_mapping = subject_mapping or {}
     
     def load_file(self, path: Path) -> EMGData:
         """Load a single text file.
@@ -158,7 +162,12 @@ class TextFileLoader(DataLoader):
             emg_name = name
         
         # Extract subject from parent directory name
-        metadata["subject"] = path.parent.name
+        folder_name = path.parent.name
+        # Use subject_mapping to standardize subject ID if available
+        if self.subject_mapping and folder_name in self.subject_mapping:
+            metadata["subject"] = self.subject_mapping[folder_name]
+        else:
+            metadata["subject"] = folder_name
         
         # Try to extract repetition number
         rep_match = re.search(r"_(\d+)\.txt$", name)

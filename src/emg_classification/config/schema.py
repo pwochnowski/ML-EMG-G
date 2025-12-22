@@ -35,6 +35,14 @@ class DatasetConfig(BaseModel):
     label_mapping: Dict[str, int] = Field(
         default_factory=dict, description="Mapping from filename prefix to class ID"
     )
+    
+    # Subject configuration
+    # Can be a list of subject IDs (db1) or a dict mapping folder names to IDs (rami)
+    subjects: Optional[Union[List[str], Dict[str, str]]] = Field(
+        default=None,
+        description="Subject list or mapping. List format: ['s01', 's02', ...]. "
+                    "Dict format: {'folder_name': 'subject_id', ...}"
+    )
 
 
 class WindowConfig(BaseModel):

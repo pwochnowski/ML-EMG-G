@@ -19,7 +19,7 @@ from ..base import DataLoader, EMGData
 # NinaPro DB1 exercise label offsets for globally unique labels
 # E1: 12 movements (1-12), E2: 17 movements (13-29), E3: 23 movements (30-52)
 # Rest (0) stays as 0 across all exercises
-NINAPRO_DB1_LABEL_OFFSETS = {
+DB1_LABEL_OFFSETS = {
     1: 0,   # E1: labels 1-12 stay as 1-12
     2: 12,  # E2: labels 1-17 become 13-29
     3: 29,  # E3: labels 1-23 become 30-52
@@ -113,7 +113,7 @@ class MatFileLoader(DataLoader):
         # Apply global label offset if enabled (makes labels unique across exercises)
         if self.global_labels and "exercise" in metadata:
             exercise = metadata["exercise"]
-            offset = NINAPRO_DB1_LABEL_OFFSETS.get(exercise, 0)
+            offset = DB1_LABEL_OFFSETS.get(exercise, 0)
             # Only offset non-rest labels (rest=0 stays as 0)
             labels = np.where(labels > 0, labels + offset, labels)
         

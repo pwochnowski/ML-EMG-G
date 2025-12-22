@@ -6,7 +6,7 @@ This directory contains EMG datasets for gesture recognition research.
 
 | Dataset | Subjects | Channels | Classes | Sampling Rate | Description |
 |---------|----------|----------|---------|---------------|-------------|
-| [ninapro_db1](ninapro_db1/) | 27 | 10 | 52 | 100 Hz | NinaPro DB1 - Hand movements |
+| [db1](db1/) | 27 | 10 | 52 | 100 Hz | NinaPro DB1 - Hand movements |
 | [rami](rami/) | 11 | 7 | 8 | 1000 Hz | Position-variant gestures |
 
 ## Directory Structure
@@ -30,10 +30,10 @@ datasets/
 ### NinaPro DB1
 
 1. Download from https://ninapro.hevs.ch/
-2. Extract to `datasets/ninapro_db1/data/`
+2. Extract to `datasets/db1/data/`
 3. Structure should be:
    ```
-   datasets/ninapro_db1/data/
+   datasets/db1/data/
    ├── s01/
    │   ├── S1_A1_E1.mat
    │   ├── S1_A1_E2.mat
