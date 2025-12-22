@@ -1,0 +1,128 @@
+# Configuration for GrabMyo Dataset
+# 28-channel surface EMG, 17 gestures, 43 subjects, 3 sessions
+# Reference: https://physionet.org/content/grabmyo/
+
+dataset:
+  name: grabmyo
+  n_channels: 16  # Forearm band only (default), or 28 for all channels
+  sampling_rate: 2048.0  # Original sampling rate
+  data_dir: datasets/myo/data
+  file_pattern: "**/*.dat"
+  loader_type: myo  # Use dataset-specific loader
+  
+  # Channel group selection:
+  # - "forearm": channels 0-15 (16 channels, forearm band)
+  # - "wrist": channels 16-27 (12 channels, wrist band)
+  # - "all": all 28 channels (both bands)
+  channel_group: forearm
+  
+  # Sessions to include (1, 2, or 3). Each subject has 3 sessions.
+  # Use subset for cross-session evaluation or all for maximum data.
+  sessions: [1, 2, 3]
+  
+  # Subject list (43 subjects total)
+  subjects:
+    - s01
+    - s02
+    - s03
+    - s04
+    - s05
+    - s06
+    - s07
+    - s08
+    - s09
+    - s10
+    - s11
+    - s12
+    - s13
+    - s14
+    - s15
+    - s16
+    - s17
+    - s18
+    - s19
+    - s20
+    - s21
+    - s22
+    - s23
+    - s24
+    - s25
+    - s26
+    - s27
+    - s28
+    - s29
+    - s30
+    - s31
+    - s32
+    - s33
+    - s34
+    - s35
+    - s36
+    - s37
+    - s38
+    - s39
+    - s40
+    - s41
+    - s42
+    - s43
+
+# Gesture labels (17 gestures including rest)
+# 1-16: Active movements, 0 or 17: Rest (depending on labeling)
+gestures:
+  - rest
+  - wrist_flexion
+  - wrist_extension
+  - wrist_pronation
+  - wrist_supination
+  - radial_deviation
+  - ulnar_deviation
+  - power_grip
+  - open_hand
+  - pinch_grip
+  - tripod_grip
+  - point_index
+  - thumb_up
+  - peace_sign
+  - rock_sign
+  - ok_sign
+  - finger_spread
+
+# Output directories (relative to dataset root)
+output:
+  features_dir: features
+  training_dir: training
+  tuning_dir: tuning
+  models_dir: models
+  analysis_dir: analysis
+
+# Default feature subdirectory (relative to features_dir)
+# Format: {extractor_type}/{subset_name}
+feature_subdir: combined/all
+
+window:
+  size: 512      # 250ms at 2048Hz
+  increment: 128 # ~62.5ms stride (75% overlap)
+
+features:
+  extractor_type: combined
+  # Spectral features (Khushaba)
+  spectral_moments: true
+  spectral_flux: true
+  spectral_sparsity: true
+  irregularity_factor: true
+  spectrum_correlation: true
+  # Time-domain features
+  time_mav: true
+  time_wl: true
+  time_zc: true
+  time_ssc: true
+  time_threshold: 0.01
+
+normalizer:
+  type: standard
+
+evaluation:
+  cv_type: loso  # Leave-one-subject-out
+  n_folds: 5
+  calibration_samples: 0
+  feature_selection: none
