@@ -8,10 +8,16 @@ Reference: https://physionet.org/content/grabmyo/
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
 import numpy as np
+
+try:
+    import wfdb
+except ImportError:
+    wfdb = None
 
 from ..base import DataLoader, EMGData
 
@@ -31,7 +37,22 @@ class MyoLoader(DataLoader):
     
     Filename pattern: session{i}_participant{j}_gesture{k}_trial{l}
     
-    TODO: Implement WFDB reading via wfdb.rdrecord()
+    Directory structure:
+        data_dir/
+            Session1/
+                session1_participant1/
+                    session1_participant1_gesture1_trial1.dat
+                    session1_participant1_gesture1_trial1.hea
+                    ...
+            Session2/
+                ...
+            Session3/
+                ...
+    
+    Example:
+        >>> loader = MyoLoader("datasets/myo/data", channel_group="forearm", sessions=[1, 2])
+        >>> data = loader.load_all()  # Load all forearm data from sessions 1 & 2
+        >>> data[0].emg.shape  # (n_samples, 16)
     """
     
     # Dataset-specific defaults
@@ -45,6 +66,11 @@ class MyoLoader(DataLoader):
         "wrist": (16, 28),    # Wrist band: channels 16-27
         "all": (0, 28),       # All channels
     }
+    
+    # Filename parsing pattern
+    FILENAME_PATTERN = re.compile(
+        r"session(\d+)_participant(\d+)_gesture(\d+)_trial(\d+)"
+    )
     
     def __init__(
         self,
@@ -68,11 +94,26 @@ class MyoLoader(DataLoader):
                 - "all": all 28 channels
             sessions: List of sessions to include (e.g., [1, 2, 3]).
                      If None, include all sessions.
+        
+        Raises:
+            ValueError: If channel_group is not valid.
+            ImportError: If wfdb package is not installed.
         """
+        if wfdb is None:
+            raise ImportError(
+                "wfdb package is required for MyoLoader. "
+                "Install it with: pip install wfdb"
+            )
+        
+        if channel_group not in self.CHANNEL_GROUPS:
+            raise ValueError(
+                f"Invalid channel_group: {channel_group}. "
+                f"Must be one of: {list(self.CHANNEL_GROUPS.keys())}"
+            )
+        
         # Set n_channels based on channel_group
-        if channel_group in self.CHANNEL_GROUPS:
-            start, end = self.CHANNEL_GROUPS[channel_group]
-            n_channels = end - start
+        start, end = self.CHANNEL_GROUPS[channel_group]
+        n_channels = end - start
         
         super().__init__(
             data_dir=data_dir,
@@ -83,6 +124,7 @@ class MyoLoader(DataLoader):
         )
         self.channel_group = channel_group
         self.sessions = sessions
+        self._channel_start, self._channel_end = start, end
     
     def load_file(self, path: Path) -> EMGData:
         """Load a single WFDB file.
@@ -94,28 +136,36 @@ class MyoLoader(DataLoader):
             EMGData with the loaded signal and metadata.
             
         Raises:
-            NotImplementedError: This is a stub - WFDB loading not yet implemented.
+            FileNotFoundError: If the WFDB record files don't exist.
+            ValueError: If the file cannot be parsed or data is invalid.
         """
-        raise NotImplementedError(
-            "MyoLoader.load_file() is not yet implemented. "
-            "Requires wfdb package: pip install wfdb"
-        )
+        # wfdb.rdrecord expects path without extension
+        record_path = path.parent / path.stem
         
-        # TODO: Implementation outline:
-        # import wfdb
-        # record_name = path.stem  # Remove .dat extension
-        # record = wfdb.rdrecord(str(path.parent / record_name))
-        # emg = record.p_signal
-        # 
-        # # Select channel group
-        # start, end = self.CHANNEL_GROUPS[self.channel_group]
-        # emg = emg[:, start:end]
-        # 
-        # # Extract metadata from filename
-        # metadata = self._extract_metadata(path)
-        # label = metadata.get("gesture", 0)
-        # 
-        # return EMGData(emg=emg, label=label, metadata=metadata)
+        # Load the WFDB record
+        record = wfdb.rdrecord(str(record_path))
+        
+        # Extract the signal (shape: n_samples, n_channels)
+        emg = record.p_signal
+        
+        # Select channel group
+        emg = emg[:, self._channel_start:self._channel_end]
+        
+        # Ensure float32 for memory efficiency
+        emg = emg.astype(np.float32)
+        
+        # Extract metadata from filename
+        metadata = self._extract_metadata(path)
+        
+        # Add WFDB record info to metadata
+        metadata["sampling_rate"] = record.fs
+        metadata["n_samples"] = record.sig_len
+        metadata["channel_group"] = self.channel_group
+        
+        # Label is the gesture number (1-indexed in dataset)
+        label = metadata.get("gesture", 0)
+        
+        return EMGData(emg=emg, label=label, metadata=metadata)
     
     def get_label(self, path: Path) -> int:
         """Extract class label from filename.
@@ -126,19 +176,12 @@ class MyoLoader(DataLoader):
             path: Path to the data file.
             
         Returns:
-            Integer class label (gesture number).
-            
-        Raises:
-            NotImplementedError: This is a stub.
+            Integer class label (gesture number, 1-17).
         """
-        raise NotImplementedError("MyoLoader.get_label() is not yet implemented.")
-        
-        # TODO: Implementation outline:
-        # import re
-        # match = re.search(r"gesture(\d+)", path.stem)
-        # if match:
-        #     return int(match.group(1))
-        # return 0
+        match = self.FILENAME_PATTERN.search(path.stem)
+        if match:
+            return int(match.group(3))  # gesture number
+        return 0
     
     def _extract_metadata(self, path: Path) -> dict:
         """Extract metadata from filename.
@@ -149,39 +192,45 @@ class MyoLoader(DataLoader):
             path: Path to the data file.
             
         Returns:
-            Dictionary with extracted metadata.
+            Dictionary with extracted metadata including:
+            - filename: Original filename
+            - filepath: Full path as string
+            - session: Session number (1-3)
+            - subject: Subject ID formatted as 's{num:02d}'
+            - participant: Raw participant number
+            - gesture: Gesture number (1-17)
+            - trial: Trial number (1-7)
+            - repetition: Same as trial (for compatibility)
+            - position: Gesture formatted as 'G{num}'
         """
-        import re
-        
         name = path.stem
         metadata = {
             "filename": path.name,
             "filepath": str(path),
         }
         
-        # Parse filename components
-        # Pattern: session{i}_participant{j}_gesture{k}_trial{l}
-        session_match = re.search(r"session(\d+)", name)
-        participant_match = re.search(r"participant(\d+)", name)
-        gesture_match = re.search(r"gesture(\d+)", name)
-        trial_match = re.search(r"trial(\d+)", name)
-        
-        if session_match:
-            metadata["session"] = int(session_match.group(1))
-        if participant_match:
-            subject_num = int(participant_match.group(1))
-            metadata["subject"] = f"s{subject_num:02d}"
-        if gesture_match:
-            metadata["gesture"] = int(gesture_match.group(1))
-            metadata["position"] = f"G{metadata['gesture']}"  # Use gesture as position
-        if trial_match:
-            metadata["trial"] = int(trial_match.group(1))
-            metadata["repetition"] = metadata["trial"]
+        # Parse filename using compiled pattern
+        match = self.FILENAME_PATTERN.search(name)
+        if match:
+            session = int(match.group(1))
+            participant = int(match.group(2))
+            gesture = int(match.group(3))
+            trial = int(match.group(4))
+            
+            metadata["session"] = session
+            metadata["participant"] = participant
+            metadata["subject"] = f"s{participant:02d}"
+            metadata["gesture"] = gesture
+            metadata["trial"] = trial
+            metadata["repetition"] = trial  # Alias for compatibility
+            metadata["position"] = f"G{gesture}"  # Alias for compatibility
         
         return metadata
     
     def discover_files(self) -> List[Path]:
         """Find all WFDB .dat files matching the pattern.
+        
+        Searches recursively through Session1/, Session2/, Session3/ directories.
         
         Returns:
             Sorted list of file paths, filtered by session if specified.
@@ -195,10 +244,9 @@ class MyoLoader(DataLoader):
         
         # Filter by session if specified
         if self.sessions is not None:
-            import re
             filtered = []
             for f in files:
-                match = re.search(r"session(\d+)", f.stem)
+                match = self.FILENAME_PATTERN.search(f.stem)
                 if match and int(match.group(1)) in self.sessions:
                     filtered.append(f)
             files = filtered
@@ -209,7 +257,7 @@ class MyoLoader(DataLoader):
         self,
         subjects: Optional[List[str]] = None,
     ) -> Dict[str, List[EMGData]]:
-        """Load files grouped by subject.
+        """Load files grouped by subject (participant).
         
         Args:
             subjects: List of subject IDs to include (e.g., ['s01', 's02']).
@@ -217,11 +265,28 @@ class MyoLoader(DataLoader):
             
         Returns:
             Dictionary mapping subject ID -> list of EMGData.
-            
-        Raises:
-            NotImplementedError: This is a stub.
         """
-        raise NotImplementedError("MyoLoader.load_by_subject() is not yet implemented.")
+        files = self.discover_files()
+        result: Dict[str, List[EMGData]] = {}
+        
+        for f in files:
+            match = self.FILENAME_PATTERN.search(f.stem)
+            if not match:
+                continue
+            
+            participant = int(match.group(2))
+            subject_id = f"s{participant:02d}"
+            
+            # Filter by subject if specified
+            if subjects is not None and subject_id not in subjects:
+                continue
+            
+            if subject_id not in result:
+                result[subject_id] = []
+            
+            result[subject_id].append(self.load_file(f))
+        
+        return result
     
     def load_by_session(
         self,
@@ -235,8 +300,102 @@ class MyoLoader(DataLoader):
             
         Returns:
             Dictionary mapping session number -> list of EMGData.
-            
-        Raises:
-            NotImplementedError: This is a stub.
         """
-        raise NotImplementedError("MyoLoader.load_by_session() is not yet implemented.")
+        files = self.discover_files()
+        result: Dict[int, List[EMGData]] = {}
+        
+        for f in files:
+            match = self.FILENAME_PATTERN.search(f.stem)
+            if not match:
+                continue
+            
+            session = int(match.group(1))
+            
+            # Filter by session if specified (in addition to self.sessions filter)
+            if sessions is not None and session not in sessions:
+                continue
+            
+            if session not in result:
+                result[session] = []
+            
+            result[session].append(self.load_file(f))
+        
+        return result
+    
+    def load_by_subject_and_session(
+        self,
+        subjects: Optional[List[str]] = None,
+        sessions: Optional[List[int]] = None,
+    ) -> Dict[str, Dict[int, List[EMGData]]]:
+        """Load files grouped by subject, then by session.
+        
+        Useful for cross-session evaluation within subjects.
+        
+        Args:
+            subjects: List of subject IDs to include (e.g., ['s01', 's02']).
+                     If None, load all subjects.
+            sessions: List of session numbers to include (e.g., [1, 2, 3]).
+                     If None, load all sessions.
+            
+        Returns:
+            Nested dictionary: subject_id -> session_number -> list of EMGData.
+        """
+        files = self.discover_files()
+        result: Dict[str, Dict[int, List[EMGData]]] = {}
+        
+        for f in files:
+            match = self.FILENAME_PATTERN.search(f.stem)
+            if not match:
+                continue
+            
+            session = int(match.group(1))
+            participant = int(match.group(2))
+            subject_id = f"s{participant:02d}"
+            
+            # Filter
+            if subjects is not None and subject_id not in subjects:
+                continue
+            if sessions is not None and session not in sessions:
+                continue
+            
+            if subject_id not in result:
+                result[subject_id] = {}
+            if session not in result[subject_id]:
+                result[subject_id][session] = []
+            
+            result[subject_id][session].append(self.load_file(f))
+        
+        return result
+    
+    def get_subject_ids(self) -> List[str]:
+        """Get all unique subject IDs in the dataset.
+        
+        Returns:
+            Sorted list of subject IDs (e.g., ['s01', 's02', ...]).
+        """
+        files = self.discover_files()
+        subjects = set()
+        
+        for f in files:
+            match = self.FILENAME_PATTERN.search(f.stem)
+            if match:
+                participant = int(match.group(2))
+                subjects.add(f"s{participant:02d}")
+        
+        return sorted(subjects)
+    
+    def get_session_ids(self) -> List[int]:
+        """Get all unique session IDs in the dataset.
+        
+        Returns:
+            Sorted list of session numbers (e.g., [1, 2, 3]).
+        """
+        files = self.discover_files()
+        sessions = set()
+        
+        for f in files:
+            match = self.FILENAME_PATTERN.search(f.stem)
+            if match:
+                sessions.add(int(match.group(1)))
+        
+        return sorted(sessions)
