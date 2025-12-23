@@ -22,17 +22,13 @@ boosting = [
 jupyter = [
     "jupyter>=1.0.0",
 ]
-gpu = [
-    "thundersvm>=0.3.12",
-    "torch>=2.0.0",
-]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.1.0",
 ]
 all = [
-    "emg-classification[boosting,jupyter,gpu,dev]",
+    "emg-classification[boosting,jupyter,dev]",
 ]
 
 [project.scripts]
