@@ -109,3 +109,4 @@ htmlcov/
 
 # mypy
 .mypy_cache/
+*.joblib

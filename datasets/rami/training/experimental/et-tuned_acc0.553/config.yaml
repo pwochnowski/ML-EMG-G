@@ -1,0 +1,22 @@
+feature_set: experimental
+dataset: rami
+models:
+- et-tuned
+normalizer: standard
+feat_select: none
+timestamp: '2025-12-24T17:24:04.654485'
+k: 50
+pca_n: 50
+subsample_frac: 0.25
+feature_subdir: experimental/all
+dataset_info:
+  n_samples: 61480
+  n_features: 210
+  n_subjects: 5
+  n_classes: 8
+  subjects:
+  - s01
+  - s02
+  - s03
+  - s04
+  - s05

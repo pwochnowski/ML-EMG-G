@@ -186,6 +186,25 @@ class RamiLoader(DataLoader):
         
         return metadata
     
+    def discover_files(self) -> List[Path]:
+        """Find all data files matching the pattern.
+        
+        Searches recursively in subject subdirectories since the Rami dataset
+        structure is: data_dir/Subject_Name/Pos*_*.txt
+        
+        Returns:
+            Sorted list of file paths.
+        """
+        # Use rglob for recursive search to find files in subject subdirectories
+        if "**" in self.file_pattern:
+            pattern = self.file_pattern.replace("**/", "")
+            files = list(self.data_dir.rglob(pattern))
+        else:
+            # Always search recursively for Rami dataset
+            files = list(self.data_dir.rglob(self.file_pattern))
+        
+        return sorted(files)
+    
     def load_by_position(
         self,
         positions: Optional[List[str]] = None,

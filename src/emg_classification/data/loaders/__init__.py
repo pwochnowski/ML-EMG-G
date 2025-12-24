@@ -35,9 +35,6 @@ _LOADER_REGISTRY: dict[str, Type[DataLoader]] = {
     "db1": DB1Loader,
     "rami": RamiLoader,
     "myo": MyoLoader,
-    # Legacy format-based loaders
-    "mat": MatFileLoader,
-    "text": TextFileLoader,
 }
 
 

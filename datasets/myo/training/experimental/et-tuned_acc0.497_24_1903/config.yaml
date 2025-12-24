@@ -1,0 +1,23 @@
+feature_set: experimental
+dataset: myo
+models:
+- et-tuned
+normalizer: standard
+feat_select: none
+timestamp: '2025-12-24T19:03:23.410197'
+k: 50
+pca_n: 50
+calibration_samples: 10
+subsample_frac: 0.1
+feature_subdir: experimental/all
+dataset_info:
+  n_samples: 13685
+  n_features: 552
+  n_subjects: 5
+  n_classes: 17
+  subjects:
+  - s01
+  - s02
+  - s03
+  - s04
+  - s05

@@ -1,0 +1,159 @@
+# Feature Set Configurations for EMG Classification
+# Reference feature sets by name in loso_train.py with --features <name>
+#
+# Each set defines which features to extract from EMG signals.
+# Features are grouped into: spectral, time-domain, histogram, and wavelet.
+
+feature_sets:
+  # Default: Standard Khushaba spectral + Hudgins time-domain features
+  default:
+    # Spectral features (Khushaba et al.)
+    spectral_moments: true      # M0-M4 spectral moments
+    spectral_flux: true         # Rate of spectrum change
+    spectral_sparsity: true     # Spectrum concentration
+    spectral_irregularity: true # Spectrum jaggedness
+    spectral_correlation: true  # Inter-channel correlation
+    # Time-domain features (Hudgins)
+    time_mav: true              # Mean Absolute Value
+    time_wl: true               # Waveform Length
+    time_zc: true               # Zero Crossings
+    time_ssc: true              # Slope Sign Changes
+    time_rms: false             # Root Mean Square
+    time_iemg: false            # Integrated EMG
+    time_var: false             # Variance
+    time_lscale: false          # L-Scale (robust dispersion)
+    # Histogram features
+    hist_enabled: false         # sEMG amplitude histogram
+    hist_bins: 10               # Number of histogram bins
+    # Wavelet features
+    wavelet_enabled: false      # Marginal DWT
+    wavelet_name: "db7"         # Wavelet family
+    wavelet_level: 3            # Decomposition levels
+    # Threshold for ZC/SSC
+    threshold: 0.01
+
+  # Full: All features enabled for maximum information
+  full:
+    spectral_moments: true
+    spectral_flux: true
+    spectral_sparsity: true
+    spectral_irregularity: true
+    spectral_correlation: true
+    time_mav: true
+    time_wl: true
+    time_zc: true
+    time_ssc: true
+    time_rms: true
+    time_iemg: true
+    time_var: true
+    time_lscale: true
+    hist_enabled: true
+    hist_bins: 10
+    wavelet_enabled: true
+    wavelet_name: "db4"         # Shorter filter for small windows
+    wavelet_level: 2            # Reduced for 40-sample windows
+    threshold: 0.01
+
+  # Minimal: Only essential time-domain features (fast)
+  minimal:
+    spectral_moments: false
+    spectral_flux: false
+    spectral_sparsity: false
+    spectral_irregularity: false
+    spectral_correlation: false
+    time_mav: true
+    time_wl: true
+    time_zc: true
+    time_ssc: true
+    time_rms: false
+    time_iemg: false
+    time_var: false
+    time_lscale: false
+    hist_enabled: false
+    hist_bins: 10
+    wavelet_enabled: false
+    wavelet_name: "db7"
+    wavelet_level: 3
+    threshold: 0.01
+
+  # Experimental: Research-optimized features based on literature
+  # Includes RMS, L-Scale, Histogram, and Wavelet features
+  experimental:
+    spectral_moments: true
+    spectral_flux: true
+    spectral_sparsity: true
+    spectral_irregularity: true
+    spectral_correlation: true
+    time_mav: true
+    time_wl: true
+    time_zc: true
+    time_ssc: true
+    time_rms: true              # Enabled per research recommendation
+    time_iemg: false
+    time_var: false
+    time_lscale: true           # L-Scale for robust dispersion
+    hist_enabled: true          # Histogram features
+    hist_bins: 10
+    wavelet_enabled: true       # mDWT features
+    wavelet_name: "db4"         # Shorter filter for small windows
+    wavelet_level: 2            # Reduced for 40-sample windows
+    threshold: 0.01
+
+  # Time-only: No spectral features (for comparison)
+  time_only:
+    spectral_moments: false
+    spectral_flux: false
+    spectral_sparsity: false
+    spectral_irregularity: false
+    spectral_correlation: false
+    time_mav: true
+    time_wl: true
+    time_zc: true
+    time_ssc: true
+    time_rms: true
+    time_iemg: true
+    time_var: true
+    time_lscale: true
+    hist_enabled: false
+    hist_bins: 10
+    wavelet_enabled: false
+    wavelet_name: "db7"
+    wavelet_level: 3
+    threshold: 0.01
+
+  # Spectral-only: No time-domain features (for comparison)
+  spectral_only:
+    spectral_moments: true
+    spectral_flux: true
+    spectral_sparsity: true
+    spectral_irregularity: true
+    spectral_correlation: true
+    time_mav: false
+    time_wl: false
+    time_zc: false
+    time_ssc: false
+    time_rms: false
+    time_iemg: false
+    time_var: false
+    time_lscale: false
+    hist_enabled: false
+    hist_bins: 10
+    wavelet_enabled: false
+    wavelet_name: "db7"
+    wavelet_level: 3
+    threshold: 0.01
+
+# Preprocessing configuration (used with --preprocess flag)
+preprocessing:
+  # Bandpass filter settings
+  bandpass:
+    enabled: true
+    lowcut: 20.0      # Hz - removes motion artifacts
+    highcut: 500.0    # Hz - Nyquist limit depends on sampling rate
+    order: 4          # Butterworth filter order
+  
+  # Notch filter settings (powerline interference)
+  notch:
+    enabled: true
+    freq: 50.0        # Hz - use 60.0 for US/Canada
+    q_factor: 30.0    # Quality factor (higher = narrower notch)

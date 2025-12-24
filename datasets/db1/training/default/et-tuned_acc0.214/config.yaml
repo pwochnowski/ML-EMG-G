@@ -1,0 +1,23 @@
+feature_set: default
+dataset: db1
+models:
+- et-tuned
+normalizer: standard
+feat_select: none
+timestamp: '2025-12-24T15:54:04.663677'
+k: 50
+pca_n: 50
+calibration_samples: 3
+subsample_frac: 0.1
+feature_subdir: combined/all
+dataset_info:
+  n_samples: 9696
+  n_features: 165
+  n_subjects: 5
+  n_classes: 52
+  subjects:
+  - s01
+  - s02
+  - s03
+  - s04
+  - s05

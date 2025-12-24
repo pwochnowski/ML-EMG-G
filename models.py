@@ -78,9 +78,6 @@ def build_model(name: str):
         clf = ExtraTreesClassifier(n_estimators=200, max_depth=20, min_samples_leaf=2,
                                    n_jobs=-1, random_state=42)
         return make_pipeline(StandardScaler(), clf)
-    if name == 'knn':
-        clf = KNeighborsClassifier(n_neighbors=5, weights='distance', n_jobs=-1)
-        return make_pipeline(StandardScaler(), clf)
     if name == 'knn-tuned':
         clf = KNeighborsClassifier(n_neighbors=21, weights='distance', metric='manhattan', n_jobs=-1)
         return make_pipeline(StandardScaler(), clf)

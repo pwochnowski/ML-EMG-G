@@ -5,7 +5,7 @@
 dataset:
   name: db1
   n_channels: 10
-  sampling_rate: 2000.0  # NinaPro DB1 is sampled at 2kHz
+  sampling_rate: 100.0  # NinaPro DB1 is downsampled to 200Hz
   data_dir: datasets/db1/data
   file_pattern: "**/*.mat"
   loader_type: db1  # Use dataset-specific loader
@@ -53,11 +53,11 @@ output:
   
 # Default feature subdirectory (relative to features_dir)
 # Format: {extractor_type}/{subset_name}
-feature_subdir: combined/e2
+feature_subdir: combined/all
 
 window:
-  size: 400      # 200ms at 2kHz
-  increment: 100 # 50ms stride (75% overlap)
+  size: 40       # 200ms at 200Hz
+  increment: 10  # 50ms stride (75% overlap)
 
 features:
   extractor_type: combined

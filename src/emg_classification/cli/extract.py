@@ -5,18 +5,33 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import sys
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, TYPE_CHECKING
 
 import numpy as np
 
 from ..config import load_config, PipelineConfig, WindowConfig, FeatureConfig, DatasetConfig
+from ..config.schema import load_feature_set, list_feature_sets, FeatureSetConfig, load_preprocessing_config, PreprocessingConfig
 from ..data.loaders import get_loader, DB1Loader, RamiLoader
 from ..data.windowing import sliding_window
 from ..features import extract_spectral_features, extract_time_features, extract_combined_features
+from ..features.combined import extract_features_from_config
+from ..preprocessing import SignalPreprocessor
 
 
-def get_extractor(config: FeatureConfig, sampling_rate: float):
-    """Get the feature extraction function based on config."""
+def get_extractor(config: FeatureConfig, sampling_rate: float, feature_set_config: Optional[FeatureSetConfig] = None):
+    """Get the feature extraction function based on config.
+    
+    Args:
+        config: FeatureConfig with extractor_type.
+        sampling_rate: Sampling rate in Hz.
+        feature_set_config: Optional FeatureSetConfig for named feature sets (experimental, full, etc.)
+    """
+    # If we have a named feature set config, use it for full feature extraction
+    if feature_set_config is not None:
+        def extractor(window):
+            return extract_features_from_config(window, feature_set_config, sampling_rate=sampling_rate)
+        return extractor
+    
     if config.extractor_type == "spectral":
         def extractor(window):
             return extract_spectral_features(
@@ -59,8 +74,22 @@ def process_subject(
     positions: Optional[List[str]] = None,
     limit: int = 0,
     subject_mapping: Optional[dict] = None,
+    feature_set_config: Optional[FeatureSetConfig] = None,
+    preprocessor: Optional[SignalPreprocessor] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Process EMG files for a single subject.
+    
+    Args:
+        subject_dir: Path to subject data directory.
+        dataset_config: Dataset configuration.
+        window_config: Windowing configuration.
+        feature_config: Basic feature configuration.
+        output_path: Optional path to save output.
+        positions: Optional list of positions to process.
+        limit: Limit files per position (0 = no limit).
+        subject_mapping: Optional mapping of folder names to subject IDs.
+        feature_set_config: Optional named feature set config (e.g., 'experimental').
+        preprocessor: Optional signal preprocessor for filtering.
     
     Returns:
         Tuple of (X, y, files, positions) arrays.
@@ -77,14 +106,14 @@ def process_subject(
     }
     
     # Add loader-specific parameters
-    if dataset_config.loader_type in ("rami", "text"):
+    if dataset_config.loader_type in ("rami"):
         loader_kwargs["label_mapping"] = dataset_config.label_mapping or None
         loader_kwargs["subject_mapping"] = subject_mapping
     
     loader = LoaderClass(**loader_kwargs)
     
-    # Get feature extractor
-    extractor = get_extractor(feature_config, dataset_config.sampling_rate)
+    # Get feature extractor (use named feature set if provided)
+    extractor = get_extractor(feature_config, dataset_config.sampling_rate, feature_set_config)
     
     # Load data by position
     data_by_pos = loader.load_by_position(positions=positions, limit_per_position=limit)
@@ -96,9 +125,14 @@ def process_subject(
     
     for pos, recordings in data_by_pos.items():
         for emg_data in recordings:
+            # Apply preprocessing if configured
+            emg_signal = emg_data.emg
+            if preprocessor is not None:
+                emg_signal = preprocessor.process(emg_signal, fs=dataset_config.sampling_rate)
+            
             # Apply sliding window
             windows = sliding_window(
-                emg_data.emg,
+                emg_signal,
                 window_size=window_config.size,
                 window_increment=window_config.increment,
             )
@@ -146,6 +180,8 @@ def process_continuous_data(
     subjects: Optional[List[str]] = None,
     exercises: Optional[List[int]] = None,
     include_rest: bool = True,
+    feature_set_config: Optional[FeatureSetConfig] = None,
+    preprocessor: Optional[SignalPreprocessor] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Process continuous EMG data with per-sample labels (e.g., NinaPro).
     
@@ -161,6 +197,8 @@ def process_continuous_data(
         subjects: List of subject IDs to process (None = all).
         exercises: List of exercise numbers to include (None = all).
         include_rest: Whether to include rest class (label 0).
+        feature_set_config: Optional named feature set config (e.g., 'experimental').
+        preprocessor: Optional signal preprocessor for filtering.
         
     Returns:
         Tuple of (X, y, groups, positions) arrays.
@@ -184,8 +222,8 @@ def process_continuous_data(
     
     loader = LoaderClass(**loader_kwargs)
     
-    # Get feature extractor
-    extractor = get_extractor(feature_config, dataset_config.sampling_rate)
+    # Get feature extractor (use named feature set if provided)
+    extractor = get_extractor(feature_config, dataset_config.sampling_rate, feature_set_config)
     
     # Load data grouped by subject
     data_by_subject = loader.load_by_subject(subjects=subjects)
@@ -214,9 +252,14 @@ def process_continuous_data(
             
             position = emg_data.metadata.get("position", f"E{exercise}")
             
+            # Apply preprocessing if configured
+            emg_signal = emg_data.emg
+            if preprocessor is not None:
+                emg_signal = preprocessor.process(emg_signal, fs=dataset_config.sampling_rate)
+            
             # Apply sliding window to both EMG and labels
             emg_windows = sliding_window(
-                emg_data.emg,
+                emg_signal,
                 window_size=window_config.size,
                 window_increment=window_config.increment,
             )
@@ -242,6 +285,138 @@ def process_continuous_data(
                 feats = extractor(emg_windows[i])
                 subject_X.append(feats)
                 subject_y.append(label)
+                subject_pos.append(position)
+        
+        if len(subject_X) == 0:
+            print(f"Warning: No features extracted for subject {subject}")
+            continue
+        
+        # Stack subject data
+        X = np.vstack([f.reshape(1, -1) if f.ndim == 1 else f for f in subject_X])
+        y = np.array(subject_y, dtype=np.int64)
+        positions_arr = np.array(subject_pos)
+        groups = np.array([subject] * len(y))
+        
+        all_X.append(X)
+        all_y.append(y)
+        all_groups.append(groups)
+        all_positions.append(positions_arr)
+        
+        # Optionally save per-subject file
+        if output_dir:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            out_path = output_dir / f"{subject}.npz"
+            np.savez_compressed(
+                out_path,
+                X=X,
+                y=y,
+                groups=groups,
+                positions=positions_arr,
+            )
+            print(f"Saved: {out_path} (X.shape={X.shape}, classes={len(np.unique(y))})")
+    
+    if len(all_X) == 0:
+        raise RuntimeError("No features extracted — check data paths and config")
+    
+    # Combine all subjects
+    X_combined = np.vstack(all_X)
+    y_combined = np.concatenate(all_y)
+    groups_combined = np.concatenate(all_groups)
+    positions_combined = np.concatenate(all_positions)
+    
+    return X_combined, y_combined, groups_combined, positions_combined
+
+
+def process_discrete_data(
+    data_dir: Path,
+    dataset_config: DatasetConfig,
+    window_config: WindowConfig,
+    feature_config: FeatureConfig,
+    output_dir: Optional[Path] = None,
+    feature_set_config: Optional[FeatureSetConfig] = None,
+    preprocessor: Optional[SignalPreprocessor] = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Process discrete EMG data with per-file labels (e.g., Myo, Rami).
+    
+    This handles datasets where each file contains one trial with a single
+    label for the entire file.
+    
+    Args:
+        data_dir: Directory containing data files.
+        dataset_config: Dataset configuration.
+        window_config: Windowing configuration.
+        feature_config: Feature extraction configuration.
+        output_dir: Directory to save output files.
+        feature_set_config: Optional named feature set config (e.g., 'experimental').
+        preprocessor: Optional signal preprocessor for filtering.
+        
+    Returns:
+        Tuple of (X, y, groups, positions) arrays.
+    """
+    # Create loader using factory function
+    LoaderClass = get_loader(dataset_config.loader_type)
+    
+    # Build loader kwargs based on loader type
+    loader_kwargs = {
+        "data_dir": data_dir,
+        "n_channels": dataset_config.n_channels,
+        "sampling_rate": dataset_config.sampling_rate,
+        "file_pattern": dataset_config.file_pattern,
+    }
+    
+    # Add loader-specific parameters
+    if dataset_config.loader_type == "rami":
+        loader_kwargs["label_mapping"] = dataset_config.label_mapping or None
+        # Get subject mapping from config
+        subjects_config = getattr(dataset_config, 'subjects', None)
+        if subjects_config and isinstance(subjects_config, dict):
+            loader_kwargs["subject_mapping"] = subjects_config
+    elif dataset_config.loader_type == "myo":
+        loader_kwargs["channel_group"] = getattr(dataset_config, 'channel_group', 'forearm')
+        loader_kwargs["sessions"] = getattr(dataset_config, 'sessions', None)
+    
+    loader = LoaderClass(**loader_kwargs)
+    
+    # Get feature extractor (use named feature set if provided)
+    extractor = get_extractor(feature_config, dataset_config.sampling_rate, feature_set_config)
+    
+    # Load data grouped by subject (all subjects)
+    data_by_subject = loader.load_by_subject(subjects=None)
+    
+    all_X = []
+    all_y = []
+    all_groups = []
+    all_positions = []
+    print(f"Processing discrete data by subject... {len(data_by_subject)}")
+    
+    for subject, recordings in sorted(data_by_subject.items()):
+        subject_X = []
+        subject_y = []
+        subject_pos = []
+        
+        for emg_data in recordings:
+            position = emg_data.metadata.get("position", "unknown")
+            
+            # Apply preprocessing if configured
+            emg_signal = emg_data.emg
+            if preprocessor is not None:
+                emg_signal = preprocessor.process(emg_signal, fs=dataset_config.sampling_rate)
+            
+            # Apply sliding window
+            emg_windows = sliding_window(
+                emg_signal,
+                window_size=window_config.size,
+                window_increment=window_config.increment,
+            )
+            
+            if emg_windows.shape[0] == 0:
+                continue
+            
+            # Extract features from each window (all windows get the file's label)
+            for w in emg_windows:
+                feats = extractor(w)
+                subject_X.append(feats)
+                subject_y.append(emg_data.label)
                 subject_pos.append(position)
         
         if len(subject_X) == 0:
@@ -343,7 +518,17 @@ def main(args: Optional[List[str]] = None):
         "--feat",
         choices=["spectral", "time", "combined"],
         default="combined",
-        help="Feature set to extract"
+        help="Feature set to extract (basic mode)"
+    )
+    parser.add_argument(
+        "--feature-set",
+        help="Named feature set from features.yaml (e.g., 'default', 'experimental', 'full'). "
+             "Overrides --feat when specified. Use --list-features to see available options."
+    )
+    parser.add_argument(
+        "--list-features",
+        action="store_true",
+        help="List available feature sets from features.yaml and exit"
     )
     parser.add_argument(
         "--n-channels",
@@ -363,12 +548,42 @@ def main(args: Optional[List[str]] = None):
         help="Include rest class (label 0) for continuous data"
     )
     parser.add_argument(
+        "--preprocess",
+        action="store_true",
+        help="Apply preprocessing (bandpass + notch filter) before feature extraction. "
+             "Uses settings from features.yaml or defaults (20-500Hz bandpass, 50Hz notch)."
+    )
+    parser.add_argument(
         "--subset-name",
         default="all",
         help="Subset name for output directory (e.g., 'all', 'e1', 'pos1'). Output: features/{extractor_type}/{subset_name}/{subject}.npz"
     )
     
     parsed = parser.parse_args(args)
+    
+    # Handle --list-features
+    if parsed.list_features:
+        print("Available feature sets (defined in src/emg_classification/config/features.yaml):")
+        for name in list_feature_sets():
+            print(f"  - {name}")
+        print("\nUse --feature-set <name> to extract features with a specific configuration.")
+        return
+    
+    # Load named feature set if specified
+    feature_set_config = None
+    if parsed.feature_set:
+        try:
+            feature_set_config = load_feature_set(parsed.feature_set)
+            print(f"Using feature set: {parsed.feature_set}")
+        except ValueError as e:
+            parser.error(str(e))
+    
+    # Set up preprocessor if requested
+    preprocessor = None
+    if parsed.preprocess:
+        preprocess_config = load_preprocessing_config()
+        preprocessor = SignalPreprocessor(preprocess_config)
+        print(f"Preprocessing enabled: {preprocessor}")
     
     # Build configs from CLI args or load from file
     if parsed.config:
@@ -394,14 +609,21 @@ def main(args: Optional[List[str]] = None):
     # Determine output directory
     output_dir = parsed.out_dir or results_dir
     
+    # Determine the feature type directory name
+    if feature_set_config:
+        feature_type_dir = parsed.feature_set  # Use feature set name as directory
+    else:
+        feature_type_dir = feature_config.extractor_type
+    
     # Route based on loader type
-    if dataset_config.loader_type == "mat":
+    # db1 has continuous per-sample labels, others have per-file labels
+    if dataset_config.loader_type == "db1":
         # Parse subjects and exercises
         subjects = parsed.subjects.split(",") if parsed.subjects else None
         exercises = [int(e) for e in parsed.exercises.split(",")] if parsed.exercises else None
         
-        # Build nested output directory: features/{extractor_type}/{subset_name}/
-        subset_output_dir = output_dir / feature_config.extractor_type / parsed.subset_name
+        # Build nested output directory: features/{feature_type}/{subset_name}/
+        subset_output_dir = output_dir / feature_type_dir / parsed.subset_name
         
         # Process continuous data (NinaPro-style)
         X, y, groups, positions = process_continuous_data(
@@ -413,6 +635,29 @@ def main(args: Optional[List[str]] = None):
             subjects=subjects,
             exercises=exercises,
             include_rest=parsed.include_rest,
+            feature_set_config=feature_set_config,
+            preprocessor=preprocessor,
+        )
+        
+        print(f"\nTotal: X.shape={X.shape}, {len(np.unique(y))} classes, {len(np.unique(groups))} subjects")
+    elif dataset_config.loader_type in ("myo", "rami"):
+        # myo/rami: use load_by_subject to extract all subjects at once
+        # --subjects argument is ignored, extracts all subjects
+        if parsed.subjects:
+            print(f"Note: --subjects argument ignored for {dataset_config.loader_type}, extracting all subjects")
+        
+        # Build nested output directory: features/{feature_type}/{subset_name}/
+        subset_output_dir = output_dir / feature_type_dir / parsed.subset_name
+        
+        # Process discrete data (per-file labels)
+        X, y, groups, positions = process_discrete_data(
+            data_dir=dataset_config.data_dir,
+            dataset_config=dataset_config,
+            window_config=window_config,
+            feature_config=feature_config,
+            output_dir=subset_output_dir,
+            feature_set_config=feature_set_config,
+            preprocessor=preprocessor,
         )
         
         print(f"\nTotal: X.shape={X.shape}, {len(np.unique(y))} classes, {len(np.unique(groups))} subjects")
@@ -434,8 +679,8 @@ def main(args: Optional[List[str]] = None):
             subject_id = folder_name
         
         if output_dir:
-            # Build nested output directory: features/{extractor_type}/{subset_name}/
-            subset_output_dir = output_dir / feature_config.extractor_type / parsed.subset_name
+            # Build nested output directory: features/{feature_type}/{subset_name}/
+            subset_output_dir = output_dir / feature_type_dir / parsed.subset_name
             subset_output_dir.mkdir(parents=True, exist_ok=True)
             if output_path:
                 output_path = subset_output_dir / output_path.name
@@ -457,6 +702,8 @@ def main(args: Optional[List[str]] = None):
             positions=positions,
             limit=parsed.limit,
             subject_mapping=subject_mapping,
+            feature_set_config=feature_set_config,
+            preprocessor=preprocessor,
         )
 
 

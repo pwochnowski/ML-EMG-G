@@ -7,6 +7,11 @@ from .normalizers import (
     SubjectAdaptiveScaler,
     get_normalizer,
 )
+from .signal_filters import (
+    SignalPreprocessor,
+    bandpass_filter,
+    notch_filter,
+)
 
 __all__ = [
     "SubjectNormalizer",
@@ -14,4 +19,7 @@ __all__ = [
     "ChannelNormalizer",
     "SubjectAdaptiveScaler",
     "get_normalizer",
+    "SignalPreprocessor",
+    "bandpass_filter",
+    "notch_filter",
 ]

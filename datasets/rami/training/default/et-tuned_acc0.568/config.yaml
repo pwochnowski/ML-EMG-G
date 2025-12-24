@@ -1,0 +1,23 @@
+feature_set: default
+dataset: rami
+models:
+- et-tuned
+normalizer: standard
+feat_select: none
+timestamp: '2025-12-24T17:23:27.917981'
+k: 50
+pca_n: 50
+calibration_samples: 10
+subsample_frac: 0.25
+feature_subdir: combined/all
+dataset_info:
+  n_samples: 61480
+  n_features: 105
+  n_subjects: 5
+  n_classes: 8
+  subjects:
+  - s01
+  - s02
+  - s03
+  - s04
+  - s05

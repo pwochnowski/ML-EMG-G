@@ -8,6 +8,11 @@ evaluation (one subject left out per fold) for the requested models.
 It reports per-model mean/std accuracy across folds and writes a CSV
 summary to `datasets/{dataset}/training/loso_summary.csv` by default. Optionally saves per-fold
 models to a directory.
+
+Feature Sets:
+    Feature extraction is done separately (see extract_features.py or combine_features.py).
+    Different feature sets are defined in src/emg_classification/config/features.yaml.
+    Use --list-features to see available feature set names.
 """
 
 from typing import Optional
@@ -17,9 +22,10 @@ import numpy as np
 import logging
 import time
 import yaml
+from datetime import datetime
 from sklearn.model_selection import LeaveOneGroupOut, StratifiedKFold, train_test_split
 from models import build_model
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, f1_score
 import joblib
 import csv
 from sklearn.feature_selection import SelectKBest, f_classif
@@ -28,6 +34,9 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from domain_adaptation import (SubjectNormalizer, PercentileNormalizer, 
                                 ChannelNormalizer, SubjectAdaptiveScaler)
+
+# Feature set configuration (for --list-features)
+from src.emg_classification.config.schema import list_feature_sets
 
 
 def load_dataset_config(dataset_name: str) -> dict:
@@ -88,6 +97,77 @@ def get_normalizer(name: str):
     if name not in normalizers:
         raise ValueError(f'Unknown normalizer: {name}. Available: {list(normalizers.keys())}')
     return normalizers[name]
+
+
+def generate_run_name(models: list[str], accuracy: float) -> str:
+    """Generate run folder name from models and accuracy.
+    
+    Format: {model(s)}_acc{accuracy:.3f}
+    Examples:
+        - et-tuned_acc0.847
+        - et-tuned_lda_acc0.823
+    """
+    model_str = '_'.join(models)
+    return f"{model_str}_acc{accuracy:.3f}"
+
+
+def resolve_run_path(base_dir: Path, run_name: str) -> Path:
+    """Resolve run path, handling collisions with timestamp suffix.
+    
+    If the path already exists, appends _dd_hhmm timestamp.
+    """
+    run_path = base_dir / run_name
+    if run_path.exists():
+        timestamp = datetime.now().strftime("%d_%H%M")
+        run_path = base_dir / f"{run_name}_{timestamp}"
+    return run_path
+
+
+def save_run_config(run_dir: Path, args: argparse.Namespace, results: list, 
+                    dataset_info: dict = None):
+    """Save configuration and metadata for a training run.
+    
+    Args:
+        run_dir: Directory to save config
+        args: Parsed command-line arguments
+        results: List of (model, accuracy, std, macro_f1, n_folds) tuples
+        dataset_info: Optional dict with dataset metadata
+    """
+    config = {
+        'feature_set': args.feature_set,
+        'dataset': args.dataset,
+        'models': [m.strip() for m in args.models.split(',')],
+        'normalizer': args.normalizer,
+        'feat_select': args.feat_select,
+        'timestamp': datetime.now().isoformat(),
+    }
+    
+    # Add optional parameters if set
+    if args.k:
+        config['k'] = args.k
+    if args.pca_n:
+        config['pca_n'] = args.pca_n
+    if args.calibration:
+        config['calibration_samples'] = args.calibration
+    if args.subsample:
+        config['subsample_frac'] = args.subsample
+    if args.subsample_n:
+        config['subsample_n'] = args.subsample_n
+    if args.labels:
+        config['labels'] = args.labels
+    if args.feature_subdir:
+        config['feature_subdir'] = args.feature_subdir
+    
+    # Add dataset info if provided
+    if dataset_info:
+        config['dataset_info'] = dataset_info
+    
+    # Save config
+    config_path = run_dir / 'config.yaml'
+    with open(config_path, 'w') as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+    
+    logging.info(f"Saved run config to {config_path}")
 
 
 def subsample_data(X, y, groups, positions, subsample_frac: Optional[float] = None, 
@@ -270,6 +350,9 @@ def run_training(X, y, groups, models, use_cv: bool = True,
         pca_n: Number of PCA components
         normalizer: Normalization strategy ('standard', 'percentile', 'channel', 'adaptive')
         calibration_samples: Number of samples per class from test subject to add to training (0 = no calibration)
+    
+    Returns:
+        List of tuples: (model_name, mean_acc, std_acc, macro_f1, n_folds)
     """
     results = []
     logo = LeaveOneGroupOut() if use_cv else None
@@ -306,6 +389,7 @@ def run_training(X, y, groups, models, use_cv: bool = True,
         if use_cv:
             # LOSO Cross-Validation
             fold_acc = []
+            fold_f1 = []
             n_folds = sum(1 for _ in logo.split(X, y, groups))
             logging.info("Running model '%s' with %d LOSO folds (feat_select=%s)", model_name, n_folds, feat_select)
             logging.info("Dataset size: %d samples, %d features", X.shape[0], X.shape[1])
@@ -349,10 +433,12 @@ def run_training(X, y, groups, models, use_cv: bool = True,
                 t_pred = time.time() - t_start
                 
                 acc = accuracy_score(y_te, y_pred)
+                f1 = f1_score(y_te, y_pred, average='macro')
                 fold_acc.append(acc)
+                fold_f1.append(f1)
 
-                logging.info("%s - fold %d/%d: acc=%.4f (fit: %.1fs, predict: %.1fs)", 
-                            model_name, fold_idx + 1, n_folds, acc, t_fit, t_pred)
+                logging.info("%s - fold %d/%d: acc=%.4f, f1=%.4f (fit: %.1fs, predict: %.1fs)", 
+                            model_name, fold_idx + 1, n_folds, acc, f1, t_fit, t_pred)
 
                 if save_models_dir:
                     save_models_dir.mkdir(parents=True, exist_ok=True)
@@ -362,8 +448,9 @@ def run_training(X, y, groups, models, use_cv: bool = True,
 
             mean_acc = float(np.mean(fold_acc))
             std_acc = float(np.std(fold_acc))
-            results.append((model_name, mean_acc, std_acc, len(fold_acc)))
-            print(f"Model: {model_name}  LOSO accuracy: {mean_acc:.4f} ± {std_acc:.4f}  (folds={len(fold_acc)})")
+            mean_f1 = float(np.mean(fold_f1))
+            results.append((model_name, mean_acc, std_acc, mean_f1, len(fold_acc)))
+            print(f"Model: {model_name}  LOSO accuracy: {mean_acc:.4f} ± {std_acc:.4f}  macro-F1: {mean_f1:.4f}  (folds={len(fold_acc)})")
 
         else:
             # No CV - train on full dataset
@@ -381,9 +468,10 @@ def run_training(X, y, groups, models, use_cv: bool = True,
             logging.info("Predict completed in %.1f seconds", t_pred)
             
             train_acc = accuracy_score(y, y_pred)
+            train_f1 = f1_score(y, y_pred, average='macro')
 
-            results.append((model_name, train_acc, 0.0, 1))
-            print(f"Model: {model_name}  Training accuracy: {train_acc:.4f}  (fit: {t_fit:.1f}s, predict: {t_pred:.1f}s)")
+            results.append((model_name, train_acc, 0.0, train_f1, 1))
+            print(f"Model: {model_name}  Training accuracy: {train_acc:.4f}  macro-F1: {train_f1:.4f}  (fit: {t_fit:.1f}s, predict: {t_pred:.1f}s)")
 
             if save_models_dir:
                 save_models_dir.mkdir(parents=True, exist_ok=True)
@@ -396,7 +484,7 @@ def run_training(X, y, groups, models, use_cv: bool = True,
         out_csv.parent.mkdir(parents=True, exist_ok=True)
         with open(out_csv, 'w', newline='') as fh:
             writer = csv.writer(fh)
-            header = ['model', 'mean_acc' if use_cv else 'train_acc', 'std_acc', 'n_folds']
+            header = ['model', 'mean_acc' if use_cv else 'train_acc', 'std_acc', 'macro_f1', 'n_folds']
             writer.writerow(header)
             for r in results:
                 writer.writerow(r)
@@ -519,6 +607,8 @@ def run_within_subject_cv(X, y, groups, models, n_folds: int = 5,
 def parse_args():
     p = argparse.ArgumentParser(description='LOSO evaluation across subjects')
     p.add_argument('--dataset', help='Dataset name (e.g. "rami"). Auto-resolves paths from config.yaml')
+    p.add_argument('--feature-set', 
+                   help='Name of the feature set used (from features.yaml). Required for training runs.')
     p.add_argument('--results-dir', help='Directory containing per-subject combined .npz files (overrides --dataset)')
     p.add_argument('--feature-subdir', help='Feature subdirectory (e.g., "combined/all", "spectral/e1"). Overrides config default.')
     p.add_argument('--pattern', default='*.npz', help='Glob pattern for feature files (default: *.npz)')
@@ -543,30 +633,44 @@ def parse_args():
     p.add_argument('--calibration', type=int, default=0, 
                    help='Number of samples per class from test subject to use for calibration (default: 0 = no calibration)')
     p.add_argument('--labels', help='Filter to specific labels. Can be comma-separated (1,2,3) or range (13-20) or mix (1-12,30-52)')
+    p.add_argument('--list-features', action='store_true', 
+                   help='List available feature sets from features.yaml and exit')
     return p.parse_args()
 
 
 if __name__ == '__main__':
     args = parse_args()
     
+    # Handle --list-features
+    if args.list_features:
+        print("Available feature sets (defined in src/emg_classification/config/features.yaml):")
+        for name in list_feature_sets():
+            print(f"  - {name}")
+        print("\nUse these names when extracting features (e.g., in combine_features.py)")
+        raise SystemExit(0)
+    
+    # Require --feature-set for actual training runs
+    if not args.feature_set:
+        raise SystemExit("Error: --feature-set is required for training runs. Use --list-features to see available options.")
+    
     # Resolve paths from dataset config or explicit arguments
     subject_list = None
+    dataset_config = None
     if args.dataset:
-        config = load_dataset_config(args.dataset)
+        dataset_config = load_dataset_config(args.dataset)
         
         # Determine feature_subdir (CLI arg overrides config)
-        feature_subdir = args.feature_subdir or config["_resolved"]["feature_subdir"]
+        feature_subdir = args.feature_subdir or dataset_config["_resolved"]["feature_subdir"]
         
         # Build results directory: features_dir / feature_subdir
-        results_dir = config["_resolved"]["features_dir"] / feature_subdir
+        results_dir = dataset_config["_resolved"]["features_dir"] / feature_subdir
         
-        default_out_csv = config["_resolved"]["training_dir"] / "loso_summary.csv"
-        default_models_dir = config["_resolved"]["models_dir"]
-        subject_list = config["_resolved"]["subjects"]
+        # Base training directory for output organization
+        training_base_dir = dataset_config["_resolved"]["training_dir"]
+        subject_list = dataset_config["_resolved"]["subjects"]
     else:
         results_dir = Path(args.results_dir) if args.results_dir else Path("results")
-        default_out_csv = results_dir / "loso_summary.csv"
-        default_models_dir = results_dir / "models"
+        training_base_dir = results_dir / "training"
     
     files = collect_subject_files(results_dir, args.pattern, subject_list)
     if not files:
@@ -612,10 +716,8 @@ if __name__ == '__main__':
         )
         print(f'After subsampling: X.shape={X.shape} (was {X_orig_shape}), reduction={1 - X.shape[0]/X_orig_shape[0]:.1%}')
 
-    # prepare model list and output dirs
+    # prepare model list
     models = [m.strip() for m in args.models.split(',') if m.strip()]
-    save_models_dir = Path(args.save_models_dir) if args.save_models_dir else default_models_dir
-    out_csv = Path(args.out_csv) if args.out_csv else default_out_csv
     use_cv = not args.no_cv
 
     # configure logging
@@ -623,11 +725,22 @@ if __name__ == '__main__':
     logging.basicConfig(level=numeric_level, format='%(asctime)s %(levelname)s: %(message)s')
     logging.info('Logging level set to %s', args.log_level.upper())
 
+    # Dataset info for config saving
+    dataset_info = {
+        'n_samples': X.shape[0],
+        'n_features': X.shape[1],
+        'n_subjects': len(np.unique(groups)),
+        'n_classes': len(np.unique(y)),
+        'subjects': [s for s, _ in files],
+    }
+
     # Handle within-subject CV mode
     if args.within_subject:
-        out_csv_within = Path(str(args.out_csv).replace('.csv', '_within_subject.csv'))
+        # Within-subject mode uses legacy output paths
+        legacy_out_csv = training_base_dir / "loso_summary_within_subject.csv"
+        out_csv_within = Path(args.out_csv) if args.out_csv else legacy_out_csv
         run_within_subject_cv(X, y, groups, models, n_folds=args.n_folds,
-                              save_models_dir=save_models_dir, out_csv=out_csv_within,
+                              save_models_dir=None, out_csv=out_csv_within,
                               feat_select=args.feat_select, k=args.k, pca_n=args.pca_n)
     # handle per-position evaluation
     elif args.per_position:
@@ -655,18 +768,67 @@ if __name__ == '__main__':
                 logging.warning("Skipping position '%s' because fewer than 2 subjects present (needed for CV)", pos)
                 continue
 
-            # per-position outputs
-            out_csv_pos = Path(str(args.out_csv).replace('.csv', f'_{pos}.csv'))
-            save_models_dir_pos = Path(args.save_models_dir) / pos if args.save_models_dir else None
-            
-            run_training(X_pos, y_pos, groups_pos, models, use_cv=use_cv,
-                         save_models_dir=save_models_dir_pos, out_csv=out_csv_pos,
+            # Run training first to get results
+            results = run_training(X_pos, y_pos, groups_pos, models, use_cv=use_cv,
+                         save_models_dir=None, out_csv=None,
                          feat_select=args.feat_select, k=args.k, pca_n=args.pca_n,
                          normalizer=args.normalizer, calibration_samples=args.calibration)
+            
+            # Generate output path based on best accuracy
+            if results:
+                best_acc = max(r[1] for r in results)  # r[1] is mean_acc
+                run_name = generate_run_name(models, best_acc)
+                run_name = f"{run_name}_{pos}"  # Append position
+                
+                # Output structure: training/{feature_set}/{run_name}/
+                feature_set_dir = training_base_dir / args.feature_set
+                run_dir = resolve_run_path(feature_set_dir, run_name)
+                run_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Save results CSV
+                out_csv = run_dir / "results.csv"
+                with open(out_csv, 'w', newline='') as fh:
+                    writer = csv.writer(fh)
+                    header = ['model', 'accuracy', 'std', 'macro_f1', 'n_folds']
+                    writer.writerow(header)
+                    for r in results:
+                        writer.writerow(r)
+                print(f"Saved results to: {out_csv}")
+                
+                # Save run config
+                save_run_config(run_dir, args, results, dataset_info)
+            
             logging.info("Finished position '%s'", pos)
     elif not args.within_subject:
         # Run on full dataset (LOSO or no-CV)
-        run_training(X, y, groups, models, use_cv=use_cv,
-                     save_models_dir=save_models_dir, out_csv=out_csv,
+        results = run_training(X, y, groups, models, use_cv=use_cv,
+                     save_models_dir=None, out_csv=None,
                      feat_select=args.feat_select, k=args.k, pca_n=args.pca_n,
                      normalizer=args.normalizer, calibration_samples=args.calibration)
+        
+        # Generate output path based on best accuracy
+        if results:
+            best_acc = max(r[1] for r in results)  # r[1] is mean_acc
+            run_name = generate_run_name(models, best_acc)
+            
+            # Output structure: training/{feature_set}/{run_name}/
+            feature_set_dir = training_base_dir / args.feature_set
+            run_dir = resolve_run_path(feature_set_dir, run_name)
+            run_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Save results CSV
+            out_csv = run_dir / "results.csv"
+            with open(out_csv, 'w', newline='') as fh:
+                writer = csv.writer(fh)
+                header = ['model', 'accuracy', 'std', 'macro_f1', 'n_folds']
+                writer.writerow(header)
+                for r in results:
+                    writer.writerow(r)
+            print(f"Saved results to: {out_csv}")
+            
+            # Save run config
+            save_run_config(run_dir, args, results, dataset_info)
+            
+            print(f"\n{'='*60}")
+            print(f"Run output saved to: {run_dir}")
+            print(f"{'='*60}")
