@@ -15,10 +15,19 @@ dependencies = [
     "pywavelets>=1.6.0",
 ]
 
+[tool.uv]
+extra-index-url = ["https://pypi.nvidia.com"]
+
 [project.optional-dependencies]
 boosting = [
-    "xgboost>=2.0.0",
+    "xgboost>=2.1.4",
     "lightgbm>=4.0.0",
+]
+gpu = [
+    "xgboost>=2.1.4",
+    "lightgbm>=4.0.0",
+    "cuml-cu12>=24.0",
+    # Note: cuML requires separate installation via conda or pip with CUDA 12.x
 ]
 wavelet = [
     "PyWavelets>=1.4.0",
@@ -57,3 +66,4 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
+
