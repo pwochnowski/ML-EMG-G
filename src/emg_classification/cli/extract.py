@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 import sys
+import time
 from typing import List, Optional, Tuple, Union, TYPE_CHECKING
 
 import numpy as np
@@ -15,7 +17,16 @@ from ..data.loaders import get_loader, DB1Loader, RamiLoader
 from ..data.windowing import sliding_window
 from ..features import extract_spectral_features, extract_time_features, extract_combined_features
 from ..features.combined import extract_features_from_config
+from ..features.gpu import CUPY_AVAILABLE, extract_features_batch_gpu
 from ..preprocessing import SignalPreprocessor
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 
 def get_extractor(config: FeatureConfig, sampling_rate: float, feature_set_config: Optional[FeatureSetConfig] = None):
@@ -233,8 +244,25 @@ def process_continuous_data(
     all_groups = []
     all_positions = []
     
+    # Check if GPU is available for batch processing
+    use_gpu = False and CUPY_AVAILABLE and feature_set_config is not None
+    
     for subject, recordings in sorted(data_by_subject.items()):
-        subject_X = []
+        # Check if subject already exists
+        if output_dir:
+            out_path = output_dir / f"{subject}.npz"
+            if out_path.exists():
+                print(f"Skipping {subject}: {out_path} already exists")
+                # Load existing data to include in combined output
+                data = np.load(out_path)
+                all_X.append(data['X'])
+                all_y.append(data['y'])
+                all_groups.append(data['groups'])
+                all_positions.append(data['positions'])
+                continue
+        
+        # Collect all windows for this subject first (for batch GPU processing)
+        subject_windows = []
         subject_y = []
         subject_pos = []
         
@@ -281,18 +309,27 @@ def process_continuous_data(
                 if not include_rest and label == 0:
                     continue
                 
-                # Extract features
-                feats = extractor(emg_windows[i])
-                subject_X.append(feats)
+                # Collect window and label
+                subject_windows.append(emg_windows[i])
                 subject_y.append(label)
                 subject_pos.append(position)
         
-        if len(subject_X) == 0:
+        if len(subject_windows) == 0:
             print(f"Warning: No features extracted for subject {subject}")
             continue
         
-        # Stack subject data
-        X = np.vstack([f.reshape(1, -1) if f.ndim == 1 else f for f in subject_X])
+        # Extract features - use GPU batch processing if available
+        if use_gpu:
+            windows_batch = np.array(subject_windows, dtype=np.float32)
+            X = extract_features_batch_gpu(
+                windows_batch,
+                sampling_rate=dataset_config.sampling_rate,
+                config=feature_set_config,
+            )
+        else:
+            subject_X = [extractor(w) for w in subject_windows]
+            X = np.vstack([f.reshape(1, -1) if f.ndim == 1 else f for f in subject_X])
+        
         y = np.array(subject_y, dtype=np.int64)
         positions_arr = np.array(subject_pos)
         groups = np.array([subject] * len(y))
@@ -316,7 +353,19 @@ def process_continuous_data(
             print(f"Saved: {out_path} (X.shape={X.shape}, classes={len(np.unique(y))})")
     
     if len(all_X) == 0:
-        raise RuntimeError("No features extracted — check data paths and config")
+        # Check if we skipped all subjects because they already exist
+        if output_dir and any((output_dir / f"{s}.npz").exists() for s in data_by_subject.keys()):
+            # Load existing data
+            for subject in sorted(data_by_subject.keys()):
+                out_path = output_dir / f"{subject}.npz"
+                if out_path.exists():
+                    data = np.load(out_path)
+                    all_X.append(data['X'])
+                    all_y.append(data['y'])
+                    all_groups.append(data['groups'])
+                    all_positions.append(data['positions'])
+        else:
+            raise RuntimeError("No features extracted — check data paths and config")
     
     # Combine all subjects
     X_combined = np.vstack(all_X)
@@ -353,8 +402,15 @@ def process_discrete_data(
     Returns:
         Tuple of (X, y, groups, positions) arrays.
     """
+    logger.info(f"Starting discrete data processing from: {data_dir}")
+    logger.info(f"  data_dir exists: {data_dir.exists()}")
+    logger.info(f"  data_dir is_symlink: {data_dir.is_symlink()}")
+    if data_dir.is_symlink():
+        logger.info(f"  symlink target: {data_dir.resolve()}")
+    
     # Create loader using factory function
     LoaderClass = get_loader(dataset_config.loader_type)
+    logger.info(f"Using loader: {LoaderClass.__name__}")
     
     # Build loader kwargs based on loader type
     loader_kwargs = {
@@ -363,6 +419,9 @@ def process_discrete_data(
         "sampling_rate": dataset_config.sampling_rate,
         "file_pattern": dataset_config.file_pattern,
     }
+    logger.info(f"Loader kwargs: n_channels={dataset_config.n_channels}, "
+                f"sampling_rate={dataset_config.sampling_rate}, "
+                f"file_pattern={dataset_config.file_pattern}")
     
     # Add loader-specific parameters
     if dataset_config.loader_type == "rami":
@@ -374,6 +433,8 @@ def process_discrete_data(
     elif dataset_config.loader_type == "myo":
         loader_kwargs["channel_group"] = getattr(dataset_config, 'channel_group', 'forearm')
         loader_kwargs["sessions"] = getattr(dataset_config, 'sessions', None)
+        logger.info(f"Myo loader: channel_group={loader_kwargs.get('channel_group')}, "
+                    f"sessions={loader_kwargs.get('sessions')}")
     
     loader = LoaderClass(**loader_kwargs)
     
@@ -381,20 +442,48 @@ def process_discrete_data(
     extractor = get_extractor(feature_config, dataset_config.sampling_rate, feature_set_config)
     
     # Load data grouped by subject (all subjects)
+    logger.info("Loading data by subject...")
+    load_start = time.time()
     data_by_subject = loader.load_by_subject(subjects=None)
+    load_time = time.time() - load_start
+    logger.info(f"Loaded {len(data_by_subject)} subjects in {load_time:.2f}s")
     
     all_X = []
     all_y = []
     all_groups = []
     all_positions = []
-    print(f"Processing discrete data by subject... {len(data_by_subject)}")
     
-    for subject, recordings in sorted(data_by_subject.items()):
-        subject_X = []
+    # Check if GPU is available for batch processing
+    use_gpu = False and CUPY_AVAILABLE and feature_set_config is not None
+    if use_gpu:
+        logger.info(f"Processing {len(data_by_subject)} subjects (GPU accelerated)")
+    else:
+        logger.info(f"Processing {len(data_by_subject)} subjects (CPU)")
+    
+    total_subjects = len(data_by_subject)
+    for subj_idx, (subject, recordings) in enumerate(sorted(data_by_subject.items())):
+        # Check if subject already exists
+        if output_dir:
+            out_path = output_dir / f"{subject}.npz"
+            if out_path.exists():
+                logger.info(f"[{subj_idx+1}/{total_subjects}] Skipping {subject}: {out_path} already exists")
+                # Load existing data to include in combined output
+                data = np.load(out_path)
+                all_X.append(data['X'])
+                all_y.append(data['y'])
+                all_groups.append(data['groups'])
+                all_positions.append(data['positions'])
+                continue
+        
+        subj_start = time.time()
+        logger.info(f"[{subj_idx+1}/{total_subjects}] Processing subject {subject} ({len(recordings)} recordings)")
+        
+        # Collect all windows for this subject first (for batch GPU processing)
+        subject_windows = []
         subject_y = []
         subject_pos = []
         
-        for emg_data in recordings:
+        for rec_idx, emg_data in enumerate(recordings):
             position = emg_data.metadata.get("position", "unknown")
             
             # Apply preprocessing if configured
@@ -410,21 +499,40 @@ def process_discrete_data(
             )
             
             if emg_windows.shape[0] == 0:
+                logger.debug(f"  Recording {rec_idx}: 0 windows (signal too short)")
                 continue
             
-            # Extract features from each window (all windows get the file's label)
+            # Collect windows and labels
             for w in emg_windows:
-                feats = extractor(w)
-                subject_X.append(feats)
+                subject_windows.append(w)
                 subject_y.append(emg_data.label)
                 subject_pos.append(position)
         
-        if len(subject_X) == 0:
-            print(f"Warning: No features extracted for subject {subject}")
+        if len(subject_windows) == 0:
+            logger.warning(f"No features extracted for subject {subject}")
             continue
         
-        # Stack subject data
-        X = np.vstack([f.reshape(1, -1) if f.ndim == 1 else f for f in subject_X])
+        logger.info(f"  Collected {len(subject_windows)} windows, extracting features...")
+        feat_start = time.time()
+        
+        # Extract features - use GPU batch processing if available
+        if use_gpu:
+            # Stack windows for batch GPU processing
+            windows_batch = np.array(subject_windows, dtype=np.float32)
+            X = extract_features_batch_gpu(
+                windows_batch,
+                sampling_rate=dataset_config.sampling_rate,
+                config=feature_set_config,
+            )
+        else:
+            # CPU extraction window-by-window
+            subject_X = [extractor(w) for w in subject_windows]
+            X = np.vstack([f.reshape(1, -1) if f.ndim == 1 else f for f in subject_X])
+        
+        feat_time = time.time() - feat_start
+        subj_time = time.time() - subj_start
+        logger.info(f"  Features extracted: X.shape={X.shape} in {feat_time:.2f}s (total: {subj_time:.2f}s)")
+        
         y = np.array(subject_y, dtype=np.int64)
         positions_arr = np.array(subject_pos)
         groups = np.array([subject] * len(y))
@@ -445,7 +553,7 @@ def process_discrete_data(
                 groups=groups,
                 positions=positions_arr,
             )
-            print(f"Saved: {out_path} (X.shape={X.shape}, classes={len(np.unique(y))})")
+            logger.info(f"  Saved: {out_path}")
     
     if len(all_X) == 0:
         raise RuntimeError("No features extracted — check data paths and config")
@@ -455,6 +563,9 @@ def process_discrete_data(
     y_combined = np.concatenate(all_y)
     groups_combined = np.concatenate(all_groups)
     positions_combined = np.concatenate(all_positions)
+    
+    logger.info(f"Total: X.shape={X_combined.shape}, {len(np.unique(y_combined))} classes, "
+                f"{len(np.unique(groups_combined))} subjects")
     
     return X_combined, y_combined, groups_combined, positions_combined
 
@@ -554,6 +665,13 @@ def main(args: Optional[List[str]] = None):
              "Uses settings from features.yaml or defaults (20-500Hz bandpass, 50Hz notch)."
     )
     parser.add_argument(
+        "--preprocess-config",
+        type=Path,
+        default=None,
+        help="Path to a custom features.yaml file for preprocessing settings. "
+             "Allows running multiple configs in parallel without conflicts."
+    )
+    parser.add_argument(
         "--subset-name",
         default="all",
         help="Subset name for output directory (e.g., 'all', 'e1', 'pos1'). Output: features/{extractor_type}/{subset_name}/{subject}.npz"
@@ -581,7 +699,7 @@ def main(args: Optional[List[str]] = None):
     # Set up preprocessor if requested
     preprocessor = None
     if parsed.preprocess:
-        preprocess_config = load_preprocessing_config()
+        preprocess_config = load_preprocessing_config(parsed.preprocess_config)
         preprocessor = SignalPreprocessor(preprocess_config)
         print(f"Preprocessing enabled: {preprocessor}")
     
@@ -614,6 +732,20 @@ def main(args: Optional[List[str]] = None):
         feature_type_dir = parsed.feature_set  # Use feature set name as directory
     else:
         feature_type_dir = feature_config.extractor_type
+    
+    # Log configuration summary
+    logger.info("=" * 60)
+    logger.info("EMG Feature Extraction")
+    logger.info("=" * 60)
+    logger.info(f"Loader type: {dataset_config.loader_type}")
+    logger.info(f"Data dir: {dataset_config.data_dir}")
+    logger.info(f"Window: size={window_config.size}, increment={window_config.increment}")
+    logger.info(f"Feature set: {parsed.feature_set or feature_config.extractor_type}")
+    logger.info(f"Output dir: {output_dir}")
+    logger.info(f"GPU available: {CUPY_AVAILABLE}")
+    if preprocessor:
+        logger.info(f"Preprocessing: enabled")
+    logger.info("=" * 60)
     
     # Route based on loader type
     # db1 has continuous per-sample labels, others have per-file labels
@@ -688,6 +820,11 @@ def main(args: Optional[List[str]] = None):
                 output_path = subset_output_dir / f"{subject_id}.npz"
         elif output_path is None:
             output_path = Path(f"{subject_id}.npz")
+        
+        # Check if output already exists
+        if output_path.exists():
+            logger.info(f"Skipping: {output_path} already exists")
+            return
         
         # Parse positions
         positions = parsed.positions.split(",") if parsed.positions else None

@@ -1,0 +1,27 @@
+feature_set: preproc_standard_20_500
+dataset: rami
+models:
+- lda
+normalizer: standard
+feat_select: none
+timestamp: '2025-12-25T18:24:02.887300'
+k: 50
+pca_n: 50
+feature_subdir: default/preproc_standard_20_500
+dataset_info:
+  n_samples: 529680
+  n_features: 105
+  n_subjects: 11
+  n_classes: 8
+  subjects:
+  - s01
+  - s02
+  - s03
+  - s04
+  - s05
+  - s06
+  - s07
+  - s08
+  - s09
+  - s10
+  - s11

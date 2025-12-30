@@ -11,6 +11,14 @@ from .combined import (
 from .histogram import extract_histogram_features
 from .wavelet import extract_wavelet_features, PYWT_AVAILABLE
 
+# GPU-accelerated feature extraction
+from .gpu import (
+    CUPY_AVAILABLE,
+    extract_features_gpu,
+    extract_features_batch_gpu,
+    extract_features_auto,
+)
+
 __all__ = [
     "extract_spectral_features",
     "extract_time_features",
@@ -22,4 +30,9 @@ __all__ = [
     "extract_wavelet_features",
     "lscale",
     "PYWT_AVAILABLE",
+    # GPU
+    "CUPY_AVAILABLE",
+    "extract_features_gpu",
+    "extract_features_batch_gpu",
+    "extract_features_auto",
 ]

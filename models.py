@@ -52,6 +52,13 @@ try:
 except ImportError:
     CUML_AVAILABLE = False
 
+# Try to import CuPy for GPU-accelerated feature extraction
+try:
+    import cupy as cp
+    CUPY_AVAILABLE = True
+except ImportError:
+    CUPY_AVAILABLE = False
+
 # Check if CUDA is available for XGBoost/LightGBM GPU
 def _check_cuda_available():
     """Check if CUDA is available for GPU acceleration."""
@@ -285,6 +292,7 @@ def get_gpu_status():
     return {
         'cuda_available': CUDA_AVAILABLE,
         'cuml_available': CUML_AVAILABLE,
+        'cupy_available': CUPY_AVAILABLE,
         'xgboost_available': XGBOOST_AVAILABLE,
         'lightgbm_available': LIGHTGBM_AVAILABLE,
     }
@@ -298,12 +306,15 @@ def print_gpu_status():
     print("=" * 50)
     print(f"  CUDA Available:     {status['cuda_available']}")
     print(f"  cuML Available:     {status['cuml_available']}")
+    print(f"  CuPy Available:     {status['cupy_available']}")
     print(f"  XGBoost Available:  {status['xgboost_available']}")
     print(f"  LightGBM Available: {status['lightgbm_available']}")
     print("=" * 50)
     
-    if status['cuda_available'] or status['cuml_available']:
-        print("\nGPU models available:")
+    if status['cuda_available'] or status['cuml_available'] or status['cupy_available']:
+        print("\nGPU acceleration available:")
+        if status['cupy_available']:
+            print("  - Feature extraction (CuPy): extract_features_batch_gpu()")
         if status['xgboost_available'] and status['cuda_available']:
             print("  - xgb-gpu, xgb-tuned-gpu (XGBoost with CUDA)")
         if status['lightgbm_available']:

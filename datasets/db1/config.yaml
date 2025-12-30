@@ -5,7 +5,7 @@
 dataset:
   name: db1
   n_channels: 10
-  sampling_rate: 100.0  # NinaPro DB1 is downsampled to 200Hz
+  sampling_rate: 100.0
   data_dir: datasets/db1/data
   file_pattern: "**/*.mat"
   loader_type: db1  # Use dataset-specific loader

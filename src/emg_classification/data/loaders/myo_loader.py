@@ -8,7 +8,9 @@ Reference: https://physionet.org/content/grabmyo/
 
 from __future__ import annotations
 
+import logging
 import re
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
@@ -20,6 +22,8 @@ except ImportError:
     wfdb = None
 
 from ..base import DataLoader, EMGData
+
+logger = logging.getLogger(__name__)
 
 
 class MyoLoader(DataLoader):

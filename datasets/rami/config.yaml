@@ -43,7 +43,7 @@ output:
 
 # Default feature subdirectory (relative to features_dir)
 # Format: {extractor_type}/{subset_name}
-feature_subdir: combined/all
+feature_subdir: default/all
 
 window:
   size: 400      # 400ms at 1000Hz

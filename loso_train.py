@@ -21,6 +21,7 @@ import argparse
 import numpy as np
 import logging
 import time
+import gc
 import yaml
 from datetime import datetime
 from sklearn.model_selection import LeaveOneGroupOut, StratifiedKFold, train_test_split
@@ -445,6 +446,16 @@ def run_training(X, y, groups, models, use_cv: bool = True,
                     fname = save_models_dir / f"{model_name}_fold{fold_idx}.joblib"
                     joblib.dump(clf, fname)
                     logging.debug("Saved model to %s", fname)
+                
+                # Free GPU memory after each fold to prevent memory leaks with cuML
+                del X_tr, X_te, y_tr, y_te, y_pred
+                gc.collect()
+                try:
+                    import cupy as cp
+                    cp.get_default_memory_pool().free_all_blocks()
+                    cp.get_default_pinned_memory_pool().free_all_blocks()
+                except ImportError:
+                    pass
 
             mean_acc = float(np.mean(fold_acc))
             std_acc = float(np.std(fold_acc))
@@ -683,7 +694,6 @@ if __name__ == '__main__':
         if not files:
             raise SystemExit(f'No matching subjects found. Requested: {requested_subjects}')
 
-    print(f'Found {len(files)} subject files. Subjects: {[s for s,_ in files]}')
     X, y, groups, positions = load_and_pool(files)
     print(f'Pooled dataset: X.shape={X.shape}, y.shape={y.shape}, subjects={len(np.unique(groups))}')
 
