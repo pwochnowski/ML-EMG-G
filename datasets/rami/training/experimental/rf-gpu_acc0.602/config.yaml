@@ -1,0 +1,22 @@
+feature_set: experimental
+dataset: rami
+models:
+- rf-gpu
+normalizer: standard
+feat_select: none
+timestamp: '2025-12-30T21:49:38.665928'
+k: 50
+pca_n: 50
+feature_subdir: experimental/preproc_highpass_30_500
+dataset_info:
+  n_samples: 293280
+  n_features: 210
+  n_subjects: 6
+  n_classes: 8
+  subjects:
+  - s01
+  - s02
+  - s03
+  - s04
+  - s05
+  - s06

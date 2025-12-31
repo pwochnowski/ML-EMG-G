@@ -1,0 +1,44 @@
+feature_set: preproc_standard_20_500
+dataset: db1
+models:
+- lda
+normalizer: standard
+feat_select: none
+timestamp: '2025-12-30T21:38:58.654189'
+k: 50
+pca_n: 50
+subsample_frac: 0.75
+feature_subdir: default/preproc_standard_20_500
+dataset_info:
+  n_samples: 392879
+  n_features: 165
+  n_subjects: 27
+  n_classes: 52
+  subjects:
+  - s01
+  - s02
+  - s03
+  - s04
+  - s05
+  - s06
+  - s07
+  - s08
+  - s09
+  - s10
+  - s11
+  - s12
+  - s13
+  - s14
+  - s15
+  - s16
+  - s17
+  - s18
+  - s19
+  - s20
+  - s21
+  - s22
+  - s23
+  - s24
+  - s25
+  - s26
+  - s27

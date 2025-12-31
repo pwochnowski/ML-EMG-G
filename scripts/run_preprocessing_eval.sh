@@ -11,7 +11,7 @@ set -e
 
 # Parse arguments
 QUICK_FLAG="--quick"
-PARALLEL=1
+PARALLEL=3
 MODEL="lda"
 
 if [[ "$1" == "--full" ]]; then
@@ -26,9 +26,9 @@ echo "Model: $MODEL, Parallel workers: $PARALLEL"
 echo ""
 
 DATASETS=(
-    #"rami"
-    # "myo" 
-    "db1"
+    # "rami"
+    "myo" 
+    # "db1"
 )
 TOTAL_START=$(date +%s)
 

@@ -514,7 +514,11 @@ def run_within_subject_cv(X, y, groups, models, n_folds: int = 5,
     unique_subjects = np.unique(groups)
     all_results = []  # (subject, model, mean_acc, std_acc, n_folds)
     
+    i = 0
     for subj in unique_subjects:
+        i += 1
+        if i == 5:
+            break
         mask = (groups == subj)
         X_subj = X[mask]
         y_subj = y[mask]

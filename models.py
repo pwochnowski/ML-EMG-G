@@ -220,6 +220,14 @@ def build_model(name: str):
             clf = cuMLSVC(kernel='rbf', C=10.0, gamma=0.002, cache_size=500)
         return make_pipeline(StandardScaler(), clf)
     
+    if name == 'svm-linear-gpu':
+        if not CUML_AVAILABLE:
+            print("Warning: cuML not available, svm-linear-gpu falling back to CPU sklearn LinearSVC")
+            clf = LinearSVC(C=1.0, max_iter=10000, dual='auto')
+        else:
+            clf = cuMLSVC(kernel='linear', C=1.0)
+        return make_pipeline(StandardScaler(), clf)
+    
     if name == 'knn-gpu':
         if not CUML_AVAILABLE:
             print("Warning: cuML not available, knn-gpu falling back to CPU sklearn KNN")
@@ -282,7 +290,7 @@ def get_available_models():
     if LIGHTGBM_AVAILABLE:
         gpu_models.extend(['lgbm-gpu', 'lgbm-tuned-gpu'])
     # cuML models always available (fallback to CPU)
-    gpu_models.extend(['svm-gpu', 'svm-tuned-gpu', 'knn-gpu', 'rf-gpu', 'rf-tuned-gpu'])
+    gpu_models.extend(['svm-gpu', 'svm-tuned-gpu', 'svm-linear-gpu', 'knn-gpu', 'rf-gpu', 'rf-tuned-gpu'])
     
     return cpu_models + boosting_models + gpu_models
 

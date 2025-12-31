@@ -239,10 +239,10 @@ PREPROCESSING_CONFIGS = [
 
 # Quick test configs (subset for faster evaluation)
 QUICK_CONFIGS = [
-    # PreprocessingParams(name="no_preprocessing", bandpass_enabled=False, notch_enabled=False),
-    # PreprocessingParams(name="standard_20_500", bandpass_enabled=True, bandpass_lowcut=20.0, 
-    #                     bandpass_highcut=500.0, bandpass_order=4, notch_enabled=True, 
-    #                     notch_freq=50.0, notch_q=30.0),
+    PreprocessingParams(name="no_preprocessing", bandpass_enabled=False, notch_enabled=False),
+    PreprocessingParams(name="standard_20_500", bandpass_enabled=True, bandpass_lowcut=20.0, 
+                        bandpass_highcut=500.0, bandpass_order=4, notch_enabled=True, 
+                        notch_freq=50.0, notch_q=30.0),
     PreprocessingParams(name="highpass_30_500", bandpass_enabled=True, bandpass_lowcut=30.0, 
                         bandpass_highcut=500.0, bandpass_order=4, notch_enabled=True, 
                         notch_freq=50.0, notch_q=30.0),
@@ -323,7 +323,7 @@ def extract_features(dataset: str, output_subdir: str, config_path: Path,
     cmd = [
         "uv", "run", "python", "-m", "src.emg_classification.cli.extract",
         "--config", str(config_path),
-        "--feature-set", "default",
+        "--feature-set", "experimental",
         "--preprocess",
         "--out-dir", f"datasets/{dataset}/features",
         "--subset-name", output_subdir,
@@ -359,19 +359,24 @@ def run_loso_evaluation(dataset: str, model: str, feature_subdir: str,
         "uv", "run", "python", "loso_train.py",
         "--dataset", dataset,
         "--model", model,
-        "--subsample", "0.5",
+        "--subsample", "0.75",
         "--feature-subdir", f"default/{feature_subdir}",
         "--feature-set",  f"{feature_subdir}"
     ]
     
     if subjects:
         cmd.extend(["--subjects", ",".join(subjects)])
+
     if not quiet:
-        _, result = run_command(cmd, env=os.environ.copy())
+        _, cmd_output = run_command(cmd, env=os.environ.copy())
         with print_lock:
             logger.info(f"Running LOSO with {model} on {feature_subdir}...")
     else: 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        _, cmd_output = run_command(cmd, env=os.environ.copy())
+        with print_lock:
+            logger.info(f"Running LOSO with {model} on {feature_subdir}...")
+        # result = subprocess.run(cmd, capture_output=True, text=True)
+        # cmd_output = result.stdout
     
     # Parse results from output
     results = {
@@ -381,7 +386,7 @@ def run_loso_evaluation(dataset: str, model: str, feature_subdir: str,
         'n_folds': None,
     }
     
-    for line in result.stdout.split('\n'):
+    for line in cmd_output.split('\n'):
         # Look for summary line like: "Model: lda  LOSO accuracy: 0.6269 ± 0.1564  macro-F1: 0.6063  (folds=11)"
         if f"Model: {model}" in line and "LOSO accuracy:" in line:
             try:
